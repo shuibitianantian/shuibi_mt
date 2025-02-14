@@ -128,31 +128,30 @@ async def run_backtest(request: BacktestRequest):
 
 @router.get("/api/historical/{symbol}")
 async def get_historical_data(
-    symbol: str, 
-    start_time: str = None, 
-    end_time: str = None, 
-    interval: str = "1d"
+    symbol: str,
+    end_time: Optional[str] = None,  # 结束时间，不传则为当前时间
+    limit: int = 1000,  # 每次加载的K线数量
 ):
     try:
-        if start_time and end_time:
-            start = datetime.strptime(start_time, '%Y-%m-%d')
-            end = datetime.strptime(end_time, '%Y-%m-%d')
+        # 如果没有指定结束时间，使用当前时间前一天
+        if end_time:
+            end = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
         else:
-            end = datetime.now()
-            start = end - timedelta(days=20)
-        
+            end = datetime.now() - timedelta(days=1)
+            
+        # 从数据库获取数据
         data_feed = DataFeed.from_database(
             symbol=symbol,
-            interval=interval,
-            start_time=start,
+            interval='1m',
+            start_time=end - timedelta(minutes=limit),  # 向前获取limit根K线
             end_time=end,
-            resample_from_1m=True
+            resample_from_1m=False
         )
         
         return {
             "price_data": [
                 {
-                    "timestamp": index.strftime('%Y-%m-%dT%H:%M:%S'),
+                    "timestamp": index.strftime('%Y-%m-%d %H:%M:%S'),
                     "open": row['open'],
                     "high": row['high'],
                     "low": row['low'],
