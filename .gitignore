@@ -1,7 +1,7 @@
 # 日志文件
 logs/
 *.log
-
+**/node_modules
 # 数据文件
 data/
 *.csv

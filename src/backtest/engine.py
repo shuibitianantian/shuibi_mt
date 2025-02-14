@@ -16,7 +16,8 @@ class Backtest:
         start_time: datetime,
         end_time: datetime,
         initial_capital: float = 10000,
-        commission: float = 0.0004
+        commission: float = 0.0004,
+        enable_report: bool = True  # 添加参数控制报告输出
     ):
         self.logger = setup_logger('backtest')
         self.data = data_feed
@@ -28,6 +29,7 @@ class Backtest:
         
         self.initial_capital = initial_capital
         self.commission = commission
+        self.enable_report = enable_report  # 保存参数
         
         self.capital = initial_capital
         self.position = 0
@@ -39,7 +41,8 @@ class Backtest:
         
     def run(self) -> pd.DataFrame:
         """运行回测"""
-        self.logger.info(f"Starting backtest from {self.start_time} to {self.end_time}...")
+        if self.enable_report:
+            self.logger.info(f"Starting backtest from {self.start_time} to {self.end_time}...")
         
         while True:
             current_data = self.data.next()
@@ -95,11 +98,10 @@ class Backtest:
         # 生成统计数据
         stats = visualizer.generate_statistics()
         
-        # 打印完整的回测报告
-        self._print_report(stats)
-        
-        # 绘制结果
-        visualizer.plot_results()
+        if self.enable_report:
+            self._print_report(stats)
+            # 只在启用报告时绘制结果
+            visualizer.plot_results()
         
         return equity_df
     
@@ -263,9 +265,9 @@ class Backtest:
         self.logger.info("\n📈 RETURN ANALYSIS")
         self.logger.info(subseparator)
         self.logger.info(f"{'Total Return:':<20} {stats['Total Return (%)']:,.2f}%")
-        self.logger.info(f"{'Annual Return:':<20} {stats['Annual Return (%)']:,.2f}%")
-        self.logger.info(f"{'Max Drawdown:':<20} {stats['Max Drawdown (%)']:,.2f}%")
-        self.logger.info(f"{'Sharpe Ratio:':<20} {stats['Sharpe Ratio']:.2f}")
+        self.logger.info(f"{'Annual Return:':<20} {self.get_annual_return():,.2f}%")
+        self.logger.info(f"{'Max Drawdown:':<20} {self.get_max_drawdown():,.2f}%")
+        self.logger.info(f"{'Sharpe Ratio:':<20} {self.get_sharpe_ratio():.2f}")
         
         # 交易统计
         self.logger.info("\n🔄 TRADE STATISTICS")
@@ -276,7 +278,7 @@ class Backtest:
         
         self.logger.info(f"{'Number of Trades:':<20} {total_trades}")
         self.logger.info(f"{'Trades per Day:':<20} {trades_per_day:.2f}")
-        self.logger.info(f"{'Win Rate:':<20} {stats['Win Rate (%)']:.2f}%")
+        self.logger.info(f"{'Win Rate:':<20} {self.get_win_rate():.2f}%")
         
         if self.trades:
             total_pnl = self._verify_pnl()
@@ -285,7 +287,7 @@ class Backtest:
             losing_trades = [t.pnl for t in self.trades if t.pnl <= 0]
             
             # 计算风险收益指标
-            risk_reward_ratio = abs(stats['Annual Return (%)'] / stats['Max Drawdown (%)']) if stats['Max Drawdown (%)'] != 0 else float('inf')
+            risk_reward_ratio = abs(self.get_annual_return() / self.get_max_drawdown()) if self.get_max_drawdown() != 0 else float('inf')
             
             # 计算盈亏比
             total_wins = sum(winning_trades) if winning_trades else 0
@@ -314,4 +316,52 @@ class Backtest:
         """验证PnL计算的正确性"""
         # 计算总PnL
         total_pnl_from_trades = sum(trade.pnl for trade in self.trades)
-        return total_pnl_from_trades 
+        return total_pnl_from_trades
+
+    def get_annual_return(self) -> float:
+        """计算年化收益率"""
+        if not self.equity_curve:
+            return 0
+        
+        equity_df = pd.DataFrame(self.equity_curve)
+        # 确保使用 datetime 对象进行计算
+        start_date = pd.to_datetime(equity_df.index[0])
+        end_date = pd.to_datetime(equity_df.index[-1])
+        total_days = (end_date - start_date).days
+        
+        if total_days == 0:
+            return 0
+            
+        total_return = (equity_df['equity'].iloc[-1] / self.initial_capital - 1)
+        annual_return = (1 + total_return) ** (365 / total_days) - 1
+        return annual_return * 100
+
+    def get_max_drawdown(self) -> float:
+        """计算最大回撤"""
+        if not self.equity_curve:
+            return 0
+            
+        equity_df = pd.DataFrame(self.equity_curve)
+        rolling_max = equity_df['equity'].expanding().max()
+        drawdowns = (equity_df['equity'] - rolling_max) / rolling_max * 100
+        return abs(float(drawdowns.min()))
+
+    def get_sharpe_ratio(self) -> float:
+        """计算夏普比率"""
+        if not self.equity_curve:
+            return 0
+            
+        equity_df = pd.DataFrame(self.equity_curve)
+        returns = equity_df['equity'].pct_change().dropna()
+        if len(returns) == 0 or returns.std() == 0:
+            return 0
+            
+        return (returns.mean() / returns.std()) * (252 ** 0.5)  # 年化
+
+    def get_win_rate(self) -> float:
+        """计算胜率"""
+        if not self.trades:
+            return 0
+            
+        winning_trades = sum(1 for trade in self.trades if trade.pnl > 0)
+        return (winning_trades / len(self.trades)) * 100 
