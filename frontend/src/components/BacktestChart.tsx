@@ -9,7 +9,7 @@ interface Props {
 }
 
 export const BacktestChart: React.FC<Props> = ({ data }) => {
-    const { chartContainerRef, isLoading } = useChart({ data });
+    const { chartContainerRef, isLoadingRef } = useChart({ data });
 
     return (
         <div style={{ width: '100%' }}>
@@ -87,7 +87,7 @@ export const BacktestChart: React.FC<Props> = ({ data }) => {
                 </Row>
             }
             <div ref={chartContainerRef} style={{ width: '100%' }} />
-            <LoadingSpinner isLoading={isLoading} />
+            <LoadingSpinner isLoading={isLoadingRef.current} />
         </div>
     );
 }; 

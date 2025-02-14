@@ -1,81 +1,72 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { IChartApi, Time } from "lightweight-charts";
 import getHistoricalData from "apis/getHistoricalData";
+import dayjs from "dayjs";
 
-export const useChartData = (
-    chart: IChartApi | null,
-    candlestickSeriesRef: any
-) => {
-    const [isLoading, setIsLoading] = useState(false);
+export const useChartData = (candlestickSeriesRef: any) => {
+    const isLoadingRef = useRef(false);
     const oldestTimestampRef = useRef<string | null>(null);
 
-    const loadData = useCallback(
-        async (timestamp: string) => {
-            if (candlestickSeriesRef.current) {
-                const newData = await getHistoricalData(timestamp, "BTCUSDT");
+    const loadData = useCallback(async (timestamp: string) => {
+        if (candlestickSeriesRef && !isLoadingRef.current) {
+            isLoadingRef.current = true;
+            const newData = await getHistoricalData(timestamp, "BTCUSDT");
 
-                if (newData.price_data.length > 0) {
-                    oldestTimestampRef.current = newData.price_data[0].timestamp;
+            if (newData.price_data.length > 0) {
+                oldestTimestampRef.current = newData.price_data[0].timestamp;
+                const formattedData = newData.price_data.map((item: any) => ({
+                    time: (new Date(item.timestamp).getTime() / 1000) as Time,
+                    open: item.open,
+                    high: item.high,
+                    low: item.low,
+                    close: item.close,
+                    volume: item.volume,
+                }));
 
-                    const formattedData = newData.price_data.map((item: any) => ({
-                        time: (new Date(item.timestamp).getTime() / 1000) as Time,
-                        open: item.open,
-                        high: item.high,
-                        low: item.low,
-                        close: item.close,
-                        volume: item.volume,
-                    }));
-
-                    candlestickSeriesRef.current.setData([
-                        ...formattedData,
-                        ...candlestickSeriesRef.current.data(),
-                    ]);
-                }
+                candlestickSeriesRef.current.setData([
+                    ...formattedData,
+                    ...candlestickSeriesRef.current.data(),
+                ]);
             }
+            isLoadingRef.current = false;
+        }
+    }, []);
+
+    const setupScrollHandler = useCallback(
+        (chart: IChartApi) => {
+            const handleScroll = async (param: any) => {
+                if (!param || isLoadingRef.current) return;
+
+                const visibleRange = param.from;
+                const loadedRange = candlestickSeriesRef.current.data();
+                const oldestLoadedTime = loadedRange[0]?.time;
+
+                const coordinate = chart.timeScale().logicalToCoordinate(visibleRange);
+                const visibleTime =
+                    coordinate !== null
+                        ? chart.timeScale().coordinateToTime(coordinate)
+                        : null;
+
+                if (
+                    (!visibleTime) || (visibleTime &&
+                        oldestLoadedTime &&
+                        visibleTime <= oldestLoadedTime + 1000 * 60 &&
+                        oldestTimestampRef.current)
+                ) {
+                    await loadData(
+                        dayjs(oldestTimestampRef.current)
+                            .subtract(1, "minute")
+                            .format("YYYY-MM-DD HH:mm:ss")
+                    );
+                }
+            };
+
+            chart.timeScale().subscribeVisibleLogicalRangeChange(handleScroll);
+            return () =>
+                chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleScroll);
         },
-        []
+        [loadData]
     );
 
-    useEffect(() => {
-        if (!chart || !candlestickSeriesRef) return;
-
-        const handleScroll = async (param: any) => {
-            console.log('asdasda')
-
-            if (!param || isLoading) return;
-
-            const visibleRange = param.from;
-            const loadedRange = candlestickSeriesRef.current.data();
-            const oldestLoadedTime = loadedRange[0]?.time;
-
-            if (
-                visibleRange &&
-                oldestLoadedTime &&
-                visibleRange < oldestLoadedTime * 1.2
-            ) {
-                await loadMoreData();
-            }
-        };
-
-        chart.timeScale().subscribeVisibleLogicalRangeChange(handleScroll);
-
-        return () => {
-            chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleScroll);
-        };
-    }, [chart, candlestickSeriesRef, isLoading]);
-
-    const loadMoreData = async () => {
-        if (!oldestTimestampRef.current || isLoading) return;
-
-        try {
-            setIsLoading(true);
-            loadData(oldestTimestampRef.current);
-        } catch (error) {
-            console.error("Error loading more data:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    return { isLoading, loadData };
+    return { isLoadingRef, loadData, setupScrollHandler };
 };

@@ -29,34 +29,18 @@ export const useChart = ({ data }: IUseChartProps) => {
     const legendRef = useRef<HTMLDivElement | null>(null);
     const candlestickSeriesRef = useRef<any>(null);
 
-    // 使用数据加载 hook
-    const { isLoading, loadData } = useChartData(
-        chartRef.current,
-        candlestickSeriesRef
-    );
+    const { isLoadingRef, loadData, setupScrollHandler } =
+        useChartData(candlestickSeriesRef);
 
+    // 初始加载数据
     useEffect(() => {
         const yesterday = dayjs().subtract(1, "day").format("YYYY-MM-DD HH:mm:ss");
         loadData(yesterday);
     }, [loadData]);
 
-    // 添加窗口大小变化的处理
+    // 设置图表和滚动监听
     useEffect(() => {
-        const handleResize = () => {
-            if (chartRef.current && chartContainerRef.current) {
-                chartRef.current.applyOptions({
-                    width: chartContainerRef.current.clientWidth,
-                    height: window.innerHeight - 200, // 减去头部和统计信息的高度
-                });
-            }
-        };
-
-        window.addEventListener("resize", handleResize);
-        return () => window.removeEventListener("resize", handleResize);
-    }, []);
-
-    useEffect(() => {
-        if (chartContainerRef.current) {
+        if (chartContainerRef.current && !chartRef.current) {
             chartRef.current = createChart(chartContainerRef.current, {
                 width: chartContainerRef.current.clientWidth,
                 height: window.innerHeight - 200,
@@ -327,21 +311,40 @@ export const useChart = ({ data }: IUseChartProps) => {
                 // 自动调整图表大小
                 chartRef.current.timeScale().fitContent();
             }
-        }
 
-        return () => {
-            if (chartRef.current) {
-                chartRef.current.remove();
-            }
-            if (legendRef.current && legendRef.current.parentNode) {
-                legendRef.current.parentNode.removeChild(legendRef.current);
+            // 设置滚动监听
+            const cleanup = setupScrollHandler(chartRef.current);
+            return () => {
+                cleanup();
+                if (chartRef.current) {
+                    chartRef.current.remove();
+                    chartRef.current = null;
+                }
+                if (legendRef.current && legendRef.current.parentNode) {
+                    legendRef.current.parentNode.removeChild(legendRef.current);
+                }
+            };
+        }
+    }, [setupScrollHandler]);
+
+    // 添加窗口大小变化的处理
+    useEffect(() => {
+        const handleResize = () => {
+            if (chartRef.current && chartContainerRef.current) {
+                chartRef.current.applyOptions({
+                    width: chartContainerRef.current.clientWidth,
+                    height: window.innerHeight - 200, // 减去头部和统计信息的高度
+                });
             }
         };
-    }, [data]);
+
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
 
     return {
         chartContainerRef,
         chartRef,
-        isLoading,
+        isLoadingRef,
     };
 };
