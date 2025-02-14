@@ -6,11 +6,19 @@
   background: #fff;
   padding: 0 20px;
   border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .header h1 {
   margin: 0;
   color: #1890ff;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
 }
 
 .content {
@@ -29,4 +37,6 @@
   padding: 24px;
   background: #fafafa;
   border-radius: 4px;
+  height: 600px;
+  overflow: hidden;
 } 

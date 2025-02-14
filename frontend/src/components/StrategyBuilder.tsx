@@ -17,8 +17,6 @@ export const StrategyBuilder: React.FC<Props> = ({ strategy, onSubmit }) => {
       params: {},
       symbol: values.symbol,
       interval: values.interval,
-      startTime: values.dateRange[0].format('YYYY-MM-DD'),
-      endTime: values.dateRange[1].format('YYYY-MM-DD'),
       initialCapital: values.initialCapital
     };
 
@@ -79,10 +77,6 @@ export const StrategyBuilder: React.FC<Props> = ({ strategy, onSubmit }) => {
           <Select.Option value="4h">4 Hours</Select.Option>
           <Select.Option value="1d">1 Day</Select.Option>
         </Select>
-      </Form.Item>
-
-      <Form.Item label="Date Range" name="dateRange">
-        <DatePicker.RangePicker />
       </Form.Item>
 
       <Form.Item label="Initial Capital" name="initialCapital">

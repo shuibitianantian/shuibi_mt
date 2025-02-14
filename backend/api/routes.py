@@ -25,6 +25,7 @@ class BacktestResult(BaseModel):
     equity: List[Dict[str, Any]]
     trades: List[Trade]
     stats: Dict[str, float]
+    price_data: List[Dict[str, Any]]
 
 class BacktestRequest(BaseModel):
     strategyId: str
@@ -61,6 +62,7 @@ async def run_backtest(request: BacktestRequest):
         
         # 获取策略类
         strategy_class = STRATEGY_MAP.get(request.strategyId)
+        
         if not strategy_class:
             raise HTTPException(status_code=400, detail=f"Strategy {request.strategyId} not found")
             
@@ -83,7 +85,7 @@ async def run_backtest(request: BacktestRequest):
         result = {
             "equity": [
                 {
-                    "timestamp": index.strftime('%Y-%m-%d'),
+                    "timestamp": index.strftime('%Y-%m-%dT%H:%M:%S'),
                     "equity": row['equity'],
                     "position": row['position'],
                     "returns_pct": row['returns_pct']
@@ -92,12 +94,23 @@ async def run_backtest(request: BacktestRequest):
             ],
             "trades": [
                 Trade(
-                    timestamp=trade.timestamp,
+                    timestamp=trade.timestamp.strftime('%Y-%m-%dT%H:%M:%S'),
                     action=trade.action,
                     price=trade.price,
                     size=trade.size,
                     pnl=trade.pnl
                 ) for trade in backtest.trades
+            ],
+            "price_data": [
+                {
+                    "timestamp": index.strftime('%Y-%m-%dT%H:%M:%S'),
+                    "open": row['open'],
+                    "high": row['high'],
+                    "low": row['low'],
+                    "close": row['close'],
+                    "volume": row['volume']
+                }
+                for index, row in data_feed.data.iterrows()
             ],
             "stats": {
                 'Total Return (%)': float(equity_df['returns_pct'].iloc[-1]),
@@ -110,5 +123,44 @@ async def run_backtest(request: BacktestRequest):
         
         return result
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/api/historical/{symbol}")
+async def get_historical_data(
+    symbol: str, 
+    start_time: str = None, 
+    end_time: str = None, 
+    interval: str = "1d"
+):
+    try:
+        if start_time and end_time:
+            start = datetime.strptime(start_time, '%Y-%m-%d')
+            end = datetime.strptime(end_time, '%Y-%m-%d')
+        else:
+            end = datetime.now()
+            start = end - timedelta(days=20)
+        
+        data_feed = DataFeed.from_database(
+            symbol=symbol,
+            interval=interval,
+            start_time=start,
+            end_time=end,
+            resample_from_1m=True
+        )
+        
+        return {
+            "price_data": [
+                {
+                    "timestamp": index.strftime('%Y-%m-%dT%H:%M:%S'),
+                    "open": row['open'],
+                    "high": row['high'],
+                    "low": row['low'],
+                    "close": row['close'],
+                    "volume": row['volume']
+                }
+                for index, row in data_feed.data.iterrows()
+            ]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) 

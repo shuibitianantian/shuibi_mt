@@ -19,8 +19,8 @@ export interface BacktestConfig {
     params: Record<string, any>;
     symbol: string;
     interval: string;
-    startTime: string;
-    endTime: string;
+    startTime?: string;
+    endTime?: string;
     initialCapital: number;
 }
 
@@ -33,10 +33,18 @@ export interface BacktestResult {
     }>;
     trades: Array<{
         timestamp: string;
-        action: 'BUY' | 'SELL';
+        action: string;
         price: number;
         size: number;
         pnl: number;
+    }>;
+    price_data: Array<{
+        timestamp: string;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+        volume: number;
     }>;
     stats: {
         'Total Return (%)': number;
