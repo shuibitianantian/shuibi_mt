@@ -12,7 +12,34 @@ def main():
     # 初始化测试模式交易器
     test_trader = BinanceTrader(mode=TradeMode.TEST)
     
-    # 获取所有持仓
+    # 获取当前价格
+    price = test_trader.get_symbol_price('BTCUSDT')
+    print(f"Current BTCUSDT price: {price}")
+    
+    # 获取交易规则
+    rules = test_trader.get_symbol_rules('BTCUSDT')
+    
+    # 计算最小交易数量（确保名义价值 > 100 USDT）
+    min_notional = 100
+    min_qty = min_notional / price
+    
+    # 确保数量大于最小下单数量
+    quantity = max(min_qty, rules['min_qty'])
+    
+    # 调整到合法的步长
+    quantity = test_trader.round_step_size(quantity, rules['step_size'])
+    
+    print(f"Adjusted quantity: {quantity}")
+    
+    # 下市价单
+    test_trader.place_order(
+        symbol='BTCUSDT',
+        side='BUY',
+        order_type='MARKET',
+        quantity=quantity
+    )
+    
+    # 获取持仓信息
     positions = test_trader.get_positions()
     for pos in positions:
         print(pos)
@@ -23,23 +50,9 @@ def main():
         pos = btc_positions[0]
         print(f"BTC Position: {pos.position_amt} @ {pos.entry_price}")
     
-    # # 下市价单
-    # order = test_trader.place_order(
-    #     symbol='BTCUSDT',
-    #     side='BUY',
-    #     order_type='MARKET',
-    #     quantity=0.001
-    # )
-    
-    # print(f"Order placed: {order}")
-    
     # 获取余额
     btc_balance = test_trader.get_account_balance('BTC')
     print(f"BTC Balance: {btc_balance}")
-    
-    # 获取当前价格
-    price = test_trader.get_symbol_price('BTCUSDT')
-    print(f"Current BTCUSDT price: {price}")
 
 if __name__ == "__main__":
     main() 

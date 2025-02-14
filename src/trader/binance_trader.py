@@ -170,7 +170,7 @@ class BinanceTrader:
                     return float(balance['balance'])
             return 0.0
         except Exception as e:
-            print(f"Error getting balance: {str(e)}")
+            self.logger.error(f"Error getting balance: {str(e)}")
             raise
     
     def get_symbol_price(self, symbol: str) -> float:
@@ -179,7 +179,7 @@ class BinanceTrader:
             ticker = self.client.ticker_price(symbol=symbol)
             return float(ticker['price'])
         except Exception as e:
-            print(f"Error getting price: {str(e)}")
+            self.logger.error(f"Error getting price: {str(e)}")
             raise
     
     def get_positions(self, symbol: Optional[str] = None) -> List[PositionInfo]:
@@ -218,7 +218,7 @@ class BinanceTrader:
             return result
             
         except Exception as e:
-            print(f"Error getting positions: {str(e)}")
+            self.logger.error(f"Error getting positions: {str(e)}")
             raise
 
     def get_leverage(self, symbol: str) -> int:
@@ -227,5 +227,87 @@ class BinanceTrader:
             leverage_info = self.client.get_leverage_brackets(symbol=symbol)
             return int(leverage_info[0]['initialLeverage'])
         except Exception as e:
-            print(f"Error getting leverage: {str(e)}")
-            raise 
+            self.logger.error(f"Error getting leverage: {str(e)}")
+            raise
+
+    def cancel_order(self, symbol: str, order_id: str) -> bool:
+        """
+        取消订单
+        
+        Args:
+            symbol: 交易对
+            order_id: 订单ID
+            
+        Returns:
+            bool: 是否成功取消
+        """
+        try:
+            self.logger.info(f"Cancelling order {order_id} for {symbol}")
+            self.client.cancel_order(
+                symbol=symbol,
+                orderId=order_id
+            )
+            self.logger.info(f"Successfully cancelled order {order_id}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error cancelling order: {str(e)}")
+            raise
+
+    def cancel_all_orders(self, symbol: str) -> bool:
+        """
+        取消指定交易对的所有订单
+        
+        Args:
+            symbol: 交易对
+            
+        Returns:
+            bool: 是否成功取消
+        """
+        try:
+            self.logger.info(f"Cancelling all orders for {symbol}")
+            self.client.cancel_all_open_orders(symbol=symbol)
+            self.logger.info(f"Successfully cancelled all orders for {symbol}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error cancelling all orders: {str(e)}")
+            raise
+
+    def get_symbol_rules(self, symbol: str) -> Dict:
+        """
+        获取交易对的规则（最小数量、精度等）
+        
+        Args:
+            symbol: 交易对
+            
+        Returns:
+            包含规则的字典
+        """
+        try:
+            exchange_info = self.client.exchange_info()
+            for symbol_info in exchange_info['symbols']:
+                if symbol_info['symbol'] == symbol:
+                    return {
+                        'quantity_precision': symbol_info['quantityPrecision'],  # 数量精度
+                        'price_precision': symbol_info['pricePrecision'],        # 价格精度
+                        'min_qty': float(symbol_info['filters'][1]['minQty']),  # 最小下单数量
+                        'max_qty': float(symbol_info['filters'][1]['maxQty']),  # 最大下单数量
+                        'step_size': float(symbol_info['filters'][1]['stepSize'])  # 数量步长
+                    }
+            raise ValueError(f"Symbol {symbol} not found")
+        except Exception as e:
+            self.logger.error(f"Error getting symbol rules: {str(e)}")
+            raise
+
+    def round_step_size(self, quantity: float, step_size: float) -> float:
+        """
+        将数量舍入到合法的步长
+        
+        Args:
+            quantity: 原始数量
+            step_size: 步长
+        
+        Returns:
+            调整后的数量
+        """
+        precision = len(str(step_size).split('.')[-1])
+        return round(quantity - (quantity % step_size), precision) 
