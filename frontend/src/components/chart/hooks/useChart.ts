@@ -182,13 +182,15 @@ export const useChart = ({ data }: IUseChartProps) => {
       legendRef.current = document.createElement("div");
       const legend = legendRef.current;
       legend.style.position = "absolute";
+      legend.style.left = "90px"; // 固定在左侧
+      legend.style.top = "90px"; // 固定在顶部
       legend.style.padding = "8px";
       legend.style.fontSize = "12px";
       legend.style.background = "rgba(255, 255, 255, 0.9)";
-      legend.style.borderRadius = "4px";
-      legend.style.boxShadow = "0 2px 5px rgba(0,0,0,0.1)";
-      legend.style.pointerEvents = "none"; // 避免干扰鼠标事件
-      legend.style.zIndex = "3"; // 确保显示在最上层
+      //   legend.style.borderRadius = "4px";
+      //   legend.style.boxShadow = "0 2px 5px rgba(0,0,0,0.1)";
+      legend.style.pointerEvents = "none";
+      legend.style.zIndex = "3";
       chartContainerRef.current.appendChild(legend);
 
       chartRef.current.subscribeCrosshairMove((param) => {
@@ -202,65 +204,47 @@ export const useChart = ({ data }: IUseChartProps) => {
           );
 
           if (price) {
-            // 设置 tooltip 位置跟随鼠标
-            legend.style.right = "120px"; // 偏移以避免遮挡十字线
-            legend.style.top = "100px";
-
-            // 使用不同颜色显示 OHLC
-            const closeColor =
-              price.close >= price.open ? "#26a69a" : "#ef5350";
+            const color = price.close >= price.open ? "#26a69a" : "#ef5350";
             legend.innerHTML = `
-                                        <div style="color: #666;font-weight:500">Open: ${price.open.toFixed(
-                                          2
-                                        )}</div>
-                                        <div style="color: #26a69a;font-weight:500">High: ${price.high.toFixed(
-                                          2
-                                        )}</div>
-                                        <div style="color: #ef5350;font-weight:500">Low: ${price.low.toFixed(
-                                          2
-                                        )}</div>
-                                        <div style="color: ${closeColor};font-weight:500">Close: ${price.close.toFixed(
+                <span>O <span style="color: ${color};width:56px;display:inline-block;">${price.open.toFixed(
               2
-            )}</div>
-                                        ${
-                                          equity
-                                            ? `
-                                            <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #eee;">
-                                                <div style="color: rgba(41, 98, 255, 0.8)">
-                                                    Position: ${equity.position.toFixed(
-                                                      3
-                                                    )} BTC
-                                                </div>
-                                            </div>
-                                        `
-                                            : ""
-                                        }
-                                        ${
-                                          trade
-                                            ? `
-                                            <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #eee;">
-                                                <div style="color: ${
-                                                  trade.action === "BUY"
-                                                    ? "#26a69a"
-                                                    : "#ef5350"
-                                                }">
-                                                    ${
-                                                      trade.action
-                                                    } @ ${trade.price.toFixed(
-                                                2
-                                              )}
-                                                    <br/>Size: ${trade.size.toFixed(
-                                                      3
-                                                    )} BTC
-                                                    <br/>PnL: $${trade.pnl.toFixed(
-                                                      2
-                                                    )}
-                                                </div>
-                                            </div>
-                                        `
-                                            : ""
-                                        }
-                                    `;
+            )}</span></span>
+                <span>H <span style="color: ${color};width:56px;display:inline-block;">${price.high.toFixed(
+              2
+            )}</span></span>
+                <span>L <span style="color: ${color};width:56px;display:inline-block;">${price.low.toFixed(
+              2
+            )}</span></span>
+                <span>C <span style="color: ${color};width:56px;display:inline-block;">${price.close.toFixed(
+              2
+            )}</span></span>
+                ${
+                  equity
+                    ? `
+                    <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #eee;">
+                        <div style="color: rgba(41, 98, 255, 0.8)">
+                            Position: ${equity.position.toFixed(3)} BTC
+                        </div>
+                    </div>
+                `
+                    : ""
+                }
+                ${
+                  trade
+                    ? `
+                    <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #eee;">
+                        <div style="color: ${
+                          trade.action === "BUY" ? "#26a69a" : "#ef5350"
+                        }">
+                            ${trade.action} @ ${trade.price.toFixed(2)}
+                            <br/>Size: ${trade.size.toFixed(3)} BTC
+                            <br/>PnL: $${trade.pnl.toFixed(2)}
+                        </div>
+                    </div>
+                `
+                    : ""
+                }
+            `;
             legend.style.display = "block";
           }
         } else {
@@ -323,6 +307,7 @@ export const useChart = ({ data }: IUseChartProps) => {
 
       // 设置滚动监听
       const cleanup = setupScrollHandler(chartRef.current);
+
       return () => {
         cleanup();
         if (chartRef.current) {

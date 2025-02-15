@@ -17,8 +17,8 @@ def download_historical_data():
     downloader = BinanceDataDownloader()
     
     # 设置时间范围
-    start_date = datetime(2023, 11, 8)
-    end_date = datetime(2024, 1, 1)
+    start_date = datetime(2025, 2, 13)
+    end_date = datetime(2025, 2, 14)
     
     logger.info(f"Starting download from {start_date.date()} to {end_date.date()}")
     
