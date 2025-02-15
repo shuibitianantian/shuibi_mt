@@ -28,6 +28,8 @@ export const useChart = ({ data }: IUseChartProps) => {
   const chartRef = useRef<IChartApi | null>(null);
   const legendRef = useRef<HTMLDivElement | null>(null);
   const candlestickSeriesRef = useRef<any>(null);
+  const selectionStartRef = useRef<number | null>(null);
+  const selectionEndRef = useRef<number | null>(null);
 
   const { isLoadingRef, loadData, setupScrollHandler } =
     useChartData(candlestickSeriesRef);
@@ -45,11 +47,8 @@ export const useChart = ({ data }: IUseChartProps) => {
         width: chartContainerRef.current.clientWidth,
         height: window.innerHeight - 200,
         layout: {
-          background: {
-            type: ColorType.Solid,
-            color: "#ffffff",
-          },
           textColor: "rgba(33, 56, 77, 1)",
+          background: { type: ColorType.Solid, color: "#ffffff" },
         },
         crosshair: {
           mode: 1,
@@ -78,8 +77,9 @@ export const useChart = ({ data }: IUseChartProps) => {
           },
         },
         timeScale: {
-          timeVisible: true, // 显示具体时间
-          secondsVisible: false, // 不显示秒
+          timeVisible: true,
+          secondsVisible: false,
+          borderVisible: false,
         },
         grid: {
           vertLines: {
@@ -90,16 +90,22 @@ export const useChart = ({ data }: IUseChartProps) => {
           },
         },
         rightPriceScale: {
-          // 配置右侧价格轴（K线图）
           visible: true,
           autoScale: true,
+          borderVisible: false,
+          scaleMargins: {
+            top: 0.1,
+            bottom: 0.4, // 为下方图表留出更多空间
+          },
         },
         leftPriceScale: {
-          // 配置左侧价格轴（权益曲线）
           visible: true,
-          borderVisible: true,
           autoScale: true,
-          borderColor: "rgba(197, 203, 206, 0.4)",
+          borderVisible: false,
+          scaleMargins: {
+            top: 0.1,
+            bottom: 0.4, // 为下方图表留出更多空间
+          },
         },
       });
 
@@ -150,22 +156,6 @@ export const useChart = ({ data }: IUseChartProps) => {
         base: 0,
       });
 
-      // 配置主图（K线图）的价格轴
-      chartRef.current.priceScale("right").applyOptions({
-        scaleMargins: {
-          top: 0.1,
-          bottom: 0.4, // 为下方图表留出更多空间
-        },
-      });
-
-      // 配置权益曲线的价格轴
-      chartRef.current.priceScale("left").applyOptions({
-        scaleMargins: {
-          top: 0.1,
-          bottom: 0.4, // 与主图保持一致
-        },
-      });
-
       // 配置持仓量价格轴
       chartRef.current.priceScale("position").applyOptions({
         scaleMargins: {
@@ -182,13 +172,11 @@ export const useChart = ({ data }: IUseChartProps) => {
       legendRef.current = document.createElement("div");
       const legend = legendRef.current;
       legend.style.position = "absolute";
-      legend.style.left = "90px"; // 固定在左侧
-      legend.style.top = "90px"; // 固定在顶部
+      legend.style.left = "50px"; // 固定在左侧
+      legend.style.top = "10px"; // 固定在顶部
       legend.style.padding = "8px";
       legend.style.fontSize = "12px";
       legend.style.background = "rgba(255, 255, 255, 0.9)";
-      //   legend.style.borderRadius = "4px";
-      //   legend.style.boxShadow = "0 2px 5px rgba(0,0,0,0.1)";
       legend.style.pointerEvents = "none";
       legend.style.zIndex = "3";
       chartContainerRef.current.appendChild(legend);
@@ -334,6 +322,112 @@ export const useChart = ({ data }: IUseChartProps) => {
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // 添加选择区域的处理
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    // 创建 overlay div
+    const overlay = document.createElement("div");
+    overlay.style.position = "absolute";
+    overlay.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+    overlay.style.pointerEvents = "none";
+    overlay.style.display = "none";
+    overlay.style.zIndex = "2";
+
+    if (chartContainerRef.current) {
+      const element =
+        chartContainerRef.current.querySelectorAll("table tr td")[1];
+      if (element) {
+        element.appendChild(overlay);
+      }
+    }
+
+    const clearOverlay = () => {
+      overlay.style.display = "none";
+      overlay.style.width = "0px";
+      selectionStartRef.current = null;
+      selectionEndRef.current = null;
+    };
+
+    const handleMouseMove = (param: any) => {
+      if (
+        param.time &&
+        selectionStartRef.current &&
+        (param.sourceEvent?.metaKey || param.sourceEvent?.ctrlKey)
+      ) {
+        selectionEndRef.current = param.time as number;
+
+        if (chartContainerRef.current) {
+          const start = Math.min(
+            selectionStartRef.current,
+            selectionEndRef.current
+          );
+          const end = Math.max(
+            selectionStartRef.current,
+            selectionEndRef.current
+          );
+
+          // 获取时间坐标
+          const startX = chartRef.current
+            ?.timeScale()
+            .timeToCoordinate(start as Time);
+          const endX = chartRef.current
+            ?.timeScale()
+            .timeToCoordinate(end as Time);
+
+          if (startX && endX) {
+            const rect = chartContainerRef.current.getBoundingClientRect();
+            overlay.style.display = "block";
+            overlay.style.left = `${startX}px`;
+            overlay.style.width = `${endX - startX}px`;
+            overlay.style.top = "0";
+            overlay.style.height = `${rect.height}px`;
+          }
+        }
+      }
+    };
+
+    const handleMouseDown = (param: any) => {
+      if (
+        param.time &&
+        (param.sourceEvent?.metaKey || param.sourceEvent?.ctrlKey)
+      ) {
+        selectionStartRef.current = param.time as number;
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      //   清除选择
+      if (e.metaKey || e.ctrlKey) {
+        if (selectionStartRef.current && selectionEndRef.current) {
+          clearOverlay();
+        }
+        chartRef.current?.applyOptions({
+          handleScroll: false,
+          handleScale: false,
+        });
+      }
+    };
+
+    const handleKeyUp = () => {
+      selectionStartRef.current = null;
+      selectionEndRef.current = null;
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    chartRef.current.subscribeClick(handleMouseDown);
+    chartRef.current.subscribeCrosshairMove(handleMouseMove);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      chartRef.current?.unsubscribeClick(handleMouseDown);
+      chartRef.current?.unsubscribeCrosshairMove(handleMouseMove);
+      overlay.remove();
+    };
   }, []);
 
   return {

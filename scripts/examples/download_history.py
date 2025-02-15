@@ -17,7 +17,7 @@ def download_historical_data():
     downloader = BinanceDataDownloader()
     
     # 设置时间范围
-    start_date = datetime(2025, 2, 13)
+    start_date = datetime(2020, 1, 1)
     end_date = datetime(2025, 2, 14)
     
     logger.info(f"Starting download from {start_date.date()} to {end_date.date()}")
@@ -34,7 +34,7 @@ def download_historical_data():
             # 下载数据
             df = downloader.download_historical_data(
                 symbol='BTCUSDT',
-                interval='1m',
+                interval='5m',
                 start_time=current_start.strftime('%Y-%m-%d'),
                 end_time=current_end.strftime('%Y-%m-%d'),
                 save_to_db=True
