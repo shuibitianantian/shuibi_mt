@@ -40,6 +40,39 @@ STRATEGY_MAP = {
     'sma-adx': SMAWithADXStrategy
 }
 
+NO_NEED_RESAMPLE_INTERVALS = ['1m', '5m' , '15m', '1h', '1d']
+
+def get_start_time(end, interval):
+    # Convert interval string to minutes
+    interval_map = {
+        '1m': 1,
+        '5m': 5,
+        '15m': 15,
+        '30m': 30,
+        '1h': 60,
+        '4h': 240,
+        '1d': 1440,
+        '1w': 10080,
+        '1M': 43200
+    }
+    
+    # 确保 end 是 datetime 对象
+    if isinstance(end, str):
+        end = datetime.strptime(end, '%Y-%m-%d %H:%M:%S')
+    
+    interval_minutes = interval_map.get(interval, 1)
+    # Calculate bars needed based on interval
+    if interval_minutes < 60:  # For minute-based intervals
+        lookback_bars = 1000
+    elif interval_minutes < 240:  # For hourly intervals
+        lookback_bars = 500
+    else:  # For daily and larger intervals
+        lookback_bars = 200
+        
+    # Calculate start time based on interval and number of bars
+    start = end - timedelta(minutes=interval_minutes * lookback_bars)
+    return start
+
 @router.post("/api/backtest", response_model=BacktestResult)
 async def run_backtest(request: BacktestRequest):
     try:
@@ -131,6 +164,7 @@ async def get_historical_data(
     symbol: str,
     end_time: Optional[str] = None,  # 结束时间，不传则为当前时间
     limit: int = 1000,  # 每次加载的K线数量
+    interval: str = '1m'
 ):
     try:
         # 如果没有指定结束时间，使用当前时间前一天
@@ -142,10 +176,10 @@ async def get_historical_data(
         # 从数据库获取数据
         data_feed = DataFeed.from_database(
             symbol=symbol,
-            interval='1m',
-            start_time=end - timedelta(minutes=limit),  # 向前获取limit根K线
+            interval=interval,
+            start_time=get_start_time(end_time, interval),  # 向前获取limit根K线
             end_time=end,
-            resample_from_1m=False
+            resample_from_1m=interval not in NO_NEED_RESAMPLE_INTERVALS
         )
         
         return {

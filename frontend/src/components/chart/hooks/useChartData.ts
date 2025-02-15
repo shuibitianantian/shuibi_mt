@@ -1,36 +1,50 @@
 import getHistoricalData from "apis/getHistoricalData";
 import dayjs from "dayjs";
 import { IChartApi, Time } from "lightweight-charts";
-import { useCallback, useRef } from "react";
+import { Dispatch, SetStateAction, useCallback, useRef } from "react";
 
-export const useChartData = (candlestickSeriesRef: any) => {
+export const useChartData = (
+  candlestickSeriesRef: any,
+  interval: string,
+  setLoading: Dispatch<SetStateAction<boolean>>
+) => {
   const isLoadingRef = useRef(false);
   const oldestTimestampRef = useRef<string | null>(null);
 
-  const loadData = useCallback(async (timestamp: string) => {
-    if (candlestickSeriesRef && !isLoadingRef.current) {
-      isLoadingRef.current = true;
-      const newData = await getHistoricalData(timestamp, "BTCUSDT");
+  const loadData = useCallback(
+    async (timestamp: string) => {
+      if (candlestickSeriesRef && !isLoadingRef.current) {
+        isLoadingRef.current = true;
+        setLoading(() => true);
+        const newData = await getHistoricalData(
+          timestamp,
+          "BTCUSDT",
+          1000,
+          interval
+        );
 
-      if (newData.price_data.length > 0) {
-        oldestTimestampRef.current = newData.price_data[0].timestamp;
-        const formattedData = newData.price_data.map((item: any) => ({
-          time: (new Date(item.timestamp).getTime() / 1000) as Time,
-          open: item.open,
-          high: item.high,
-          low: item.low,
-          close: item.close,
-          volume: item.volume,
-        }));
+        if (newData.price_data.length > 0) {
+          oldestTimestampRef.current = newData.price_data[0].timestamp;
+          const formattedData = newData.price_data.map((item: any) => ({
+            time: (new Date(item.timestamp).getTime() / 1000) as Time,
+            open: item.open,
+            high: item.high,
+            low: item.low,
+            close: item.close,
+            volume: item.volume,
+          }));
 
-        candlestickSeriesRef.current.setData([
-          ...formattedData,
-          ...candlestickSeriesRef.current.data(),
-        ]);
+          candlestickSeriesRef.current.setData([
+            ...formattedData,
+            ...candlestickSeriesRef.current.data(),
+          ]);
+        }
+        isLoadingRef.current = false;
+        setLoading(() => false);
       }
-      isLoadingRef.current = false;
-    }
-  }, []);
+    },
+    [interval]
+  );
 
   const setupScrollHandler = useCallback(
     (chart: IChartApi) => {
@@ -69,5 +83,5 @@ export const useChartData = (candlestickSeriesRef: any) => {
     [loadData]
   );
 
-  return { isLoadingRef, loadData, setupScrollHandler };
+  return { loadData, setupScrollHandler };
 };

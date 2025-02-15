@@ -1,15 +1,40 @@
 import React from 'react';
 import { Form, Input, InputNumber, DatePicker, Button, Select } from 'antd';
-import { Strategy, BacktestConfig } from '../types/strategy';
+import { BacktestConfig, Strategy } from '../types/strategy';
 import dayjs from 'dayjs';
 
 interface Props {
-  strategy: Strategy;
   onSubmit: (config: BacktestConfig) => void;
 }
 
-export const StrategyBuilder: React.FC<Props> = ({ strategy, onSubmit }) => {
+const defaultStrategy: Strategy = {
+  id: 'sma-adx',
+  name: 'SMA with ADX Strategy',
+  description: 'A simple moving average strategy with ADX filter',
+  params: [
+    {
+      name: 'fast_period',
+      type: 'number' as const,
+      default: 5,
+      min: 2,
+      max: 200,
+      description: 'Fast moving average period'
+    },
+    {
+      name: 'slow_period',
+      type: 'number' as const,
+      default: 20,
+      min: 5,
+      max: 200,
+      description: 'Slow moving average period'
+    }
+  ]
+};
+
+export const StrategyBuilder: React.FC<Props> = ({ onSubmit }) => {
   const [form] = Form.useForm();
+
+  const strategy = defaultStrategy;
 
   const handleSubmit = (values: any) => {
     const config: BacktestConfig = {

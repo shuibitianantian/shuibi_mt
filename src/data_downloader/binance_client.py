@@ -111,11 +111,10 @@ class BinanceDataDownloader:
             if save_to_db and total_downloaded > 0:
                 skipped = total_downloaded - total_saved
                 self.logger.info(
-                    f"\nFinal summary:\n"
-                    f"Total batches: {batch_count}\n"
-                    f"Total downloaded: {total_downloaded}\n"
-                    f"Total saved: {total_saved}\n"
-                    f"Total skipped: {skipped}"
+                    f"Total batches: {batch_count} | "
+                    f"Total downloaded: {total_downloaded} | "
+                    f"Total saved: {total_saved} | "
+                    f"Total skipped: {skipped} | "
                 )
             
             return final_df

@@ -291,4 +291,13 @@ class MySQLClient:
             
         except Exception as e:
             self.logger.error(f"Error resampling data: {str(e)}")
-            raise 
+            raise
+
+    def execute_query(self, query: str):
+        """执行SQL查询并返回结果"""
+        try:
+            with self.engine.connect() as conn:
+                cursor = conn.execute(text(query))
+                return cursor.fetchall()
+        except Exception as e:
+            raise Exception(f"Database query failed: {str(e)}") 

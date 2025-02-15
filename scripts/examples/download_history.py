@@ -34,7 +34,7 @@ def download_historical_data():
             # 下载数据
             df = downloader.download_historical_data(
                 symbol='BTCUSDT',
-                interval='5m',
+                interval='15m',
                 start_time=current_start.strftime('%Y-%m-%d'),
                 end_time=current_end.strftime('%Y-%m-%d'),
                 save_to_db=True

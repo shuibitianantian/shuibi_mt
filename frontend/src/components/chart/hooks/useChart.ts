@@ -6,13 +6,18 @@ import {
   SeriesMarkerPosition,
   Time,
 } from "lightweight-charts";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BacktestResult } from "types/strategy";
 import { useChartData } from "./useChartData";
 import dayjs from "dayjs";
 
 interface IUseChartProps {
   data: BacktestResult | null;
+  selectRangeConfig?: {
+    rangeSelection: { start: number; end: number } | null;
+    setRangeSelection: (range: { start: number; end: number } | null) => void;
+  };
+  interval: string;
 }
 
 interface ChartMarker extends SeriesMarker<Time> {
@@ -23,16 +28,61 @@ interface ChartMarker extends SeriesMarker<Time> {
   size?: number;
 }
 
-export const useChart = ({ data }: IUseChartProps) => {
+export const useChart = ({
+  data,
+  selectRangeConfig,
+  interval,
+}: IUseChartProps) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const legendRef = useRef<HTMLDivElement | null>(null);
   const candlestickSeriesRef = useRef<any>(null);
   const selectionStartRef = useRef<number | null>(null);
   const selectionEndRef = useRef<number | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const { isLoadingRef, loadData, setupScrollHandler } =
-    useChartData(candlestickSeriesRef);
+  const { loadData, setupScrollHandler } = useChartData(
+    candlestickSeriesRef,
+    interval,
+    setIsLoading
+  );
+
+  const formatTime = useCallback((time: number, interval: string) => {
+    const date = new Date(time * 1000);
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, "0");
+    const day = date.getDate().toString().padStart(2, "0");
+    const hours = date.getHours().toString().padStart(2, "0");
+    const minutes = date.getMinutes().toString().padStart(2, "0");
+
+    switch (interval) {
+      case "1m":
+      case "5m":
+      case "15m":
+        return `${month}/${day} ${hours}:${minutes}`;
+      case "1h":
+        return `${month}/${day} ${hours}:00`;
+      case "1d":
+        return `${year}/${month}/${day}`;
+      default:
+        return `${month}/${day} ${hours}:${minutes}`;
+    }
+  }, []);
+
+  const clearOverlay = useCallback(() => {
+    if (overlayRef.current) {
+      overlayRef.current.style.display = "none";
+      overlayRef.current.style.width = "0px";
+      selectionStartRef.current = null;
+      selectionEndRef.current = null;
+      selectRangeConfig?.setRangeSelection(null);
+      chartRef.current?.applyOptions({
+        handleScroll: true,
+        handleScale: true,
+      });
+    }
+  }, [selectRangeConfig]);
 
   // 初始加载数据
   useEffect(() => {
@@ -71,15 +121,13 @@ export const useChart = ({ data }: IUseChartProps) => {
         localization: {
           locale: "en-US",
           priceFormatter: (price: number) => price.toFixed(2),
-          timeFormatter: (time: number) => {
-            const date = new Date(time * 1000);
-            return date.toLocaleDateString();
-          },
+          timeFormatter: (time: number) => formatTime(time, interval),
         },
         timeScale: {
           timeVisible: true,
           secondsVisible: false,
           borderVisible: false,
+          tickMarkFormatter: (time: number) => formatTime(time, interval),
         },
         grid: {
           vertLines: {
@@ -173,7 +221,6 @@ export const useChart = ({ data }: IUseChartProps) => {
       const legend = legendRef.current;
       legend.style.position = "absolute";
       legend.style.left = "50px"; // 固定在左侧
-      legend.style.top = "10px"; // 固定在顶部
       legend.style.padding = "8px";
       legend.style.fontSize = "12px";
       legend.style.background = "rgba(255, 255, 255, 0.9)";
@@ -329,27 +376,23 @@ export const useChart = ({ data }: IUseChartProps) => {
     if (!chartRef.current) return;
 
     // 创建 overlay div
-    const overlay = document.createElement("div");
-    overlay.style.position = "absolute";
-    overlay.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
-    overlay.style.pointerEvents = "none";
-    overlay.style.display = "none";
-    overlay.style.zIndex = "2";
+    if (!overlayRef.current) {
+      const overlay = document.createElement("div");
+      overlayRef.current = overlay;
+      overlay.style.position = "absolute";
+      overlay.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+      overlay.style.pointerEvents = "none";
+      overlay.style.display = "none";
+      overlay.style.zIndex = "2";
+    }
 
     if (chartContainerRef.current) {
       const element =
         chartContainerRef.current.querySelectorAll("table tr td")[1];
       if (element) {
-        element.appendChild(overlay);
+        element.appendChild(overlayRef.current);
       }
     }
-
-    const clearOverlay = () => {
-      overlay.style.display = "none";
-      overlay.style.width = "0px";
-      selectionStartRef.current = null;
-      selectionEndRef.current = null;
-    };
 
     const handleMouseMove = (param: any) => {
       if (
@@ -369,6 +412,7 @@ export const useChart = ({ data }: IUseChartProps) => {
             selectionEndRef.current
           );
 
+          selectRangeConfig?.setRangeSelection({ start, end });
           // 获取时间坐标
           const startX = chartRef.current
             ?.timeScale()
@@ -377,13 +421,13 @@ export const useChart = ({ data }: IUseChartProps) => {
             ?.timeScale()
             .timeToCoordinate(end as Time);
 
-          if (startX && endX) {
+          if (startX && endX && overlayRef.current) {
             const rect = chartContainerRef.current.getBoundingClientRect();
-            overlay.style.display = "block";
-            overlay.style.left = `${startX}px`;
-            overlay.style.width = `${endX - startX}px`;
-            overlay.style.top = "0";
-            overlay.style.height = `${rect.height}px`;
+            overlayRef.current.style.display = "block";
+            overlayRef.current.style.left = `${startX}px`;
+            overlayRef.current.style.width = `${endX - startX}px`;
+            overlayRef.current.style.top = "0";
+            overlayRef.current.style.height = `${rect.height}px`;
           }
         }
       }
@@ -391,10 +435,15 @@ export const useChart = ({ data }: IUseChartProps) => {
 
     const handleMouseDown = (param: any) => {
       if (
+        selectionStartRef.current === null &&
         param.time &&
         (param.sourceEvent?.metaKey || param.sourceEvent?.ctrlKey)
       ) {
         selectionStartRef.current = param.time as number;
+        chartRef.current?.applyOptions({
+          handleScroll: false,
+          handleScale: false,
+        });
       }
     };
 
@@ -404,10 +453,6 @@ export const useChart = ({ data }: IUseChartProps) => {
         if (selectionStartRef.current && selectionEndRef.current) {
           clearOverlay();
         }
-        chartRef.current?.applyOptions({
-          handleScroll: false,
-          handleScale: false,
-        });
       }
     };
 
@@ -420,19 +465,24 @@ export const useChart = ({ data }: IUseChartProps) => {
     window.addEventListener("keyup", handleKeyUp);
     chartRef.current.subscribeClick(handleMouseDown);
     chartRef.current.subscribeCrosshairMove(handleMouseMove);
-
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       chartRef.current?.unsubscribeClick(handleMouseDown);
       chartRef.current?.unsubscribeCrosshairMove(handleMouseMove);
-      overlay.remove();
+
+      if (overlayRef.current) {
+        overlayRef.current.remove();
+      }
     };
-  }, []);
+  }, [interval]);
 
   return {
     chartContainerRef,
     chartRef,
-    isLoadingRef,
+    isLoading,
+    selectionStartRef,
+    selectionEndRef,
+    clearOverlay,
   };
 };
