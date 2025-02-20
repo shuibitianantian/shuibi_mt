@@ -6,6 +6,7 @@ from .data_feed import DataFeed
 from .strategy import Strategy
 from .visualizer import BacktestVisualizer
 from .models import Trade
+import numpy as np
 
 class Backtest:
     """回测引擎"""
@@ -23,9 +24,15 @@ class Backtest:
         self.data = data_feed
         self.strategy = strategy
         
-        # 确保时间是 UTC 时区
-        self.start_time = pd.to_datetime(start_time).tz_localize('UTC')
-        self.end_time = pd.to_datetime(end_time).tz_localize('UTC')
+        # 统一时区处理
+        def ensure_utc(dt: datetime) -> datetime:
+            if dt.tzinfo is None:
+                return pd.Timestamp(dt).tz_localize('UTC')
+            return pd.Timestamp(dt).tz_convert('UTC')
+        
+        self.start_time = ensure_utc(start_time)
+        self.end_time = ensure_utc(end_time)
+        self.backtest_start_time = self.start_time  # 记录实际的回测开始时间
         
         self.initial_capital = initial_capital
         self.commission = commission
@@ -44,24 +51,35 @@ class Backtest:
         if self.enable_report:
             self.logger.info(f"Starting backtest from {self.start_time} to {self.end_time}...")
         
+        # 用于累积历史数据的列表
+        history_data = []
+        is_warmup = True  # 标记是否在预热阶段
+        
         while True:
             current_data = self.data.next()
             if current_data is None:
                 break
             
             current_time = self.data.get_current_time()
-            if current_time < self.start_time:
-                continue
-            if current_time >= self.end_time:
+            if current_time >= self.end_time:  # 添加结束时间判断
                 break
             
-            # 根据策略配置获取回看周期
-            lookback_periods = getattr(self.strategy, 'lookback_periods', 100)
-            history = self.data.look_back(lookback_periods)
+            # 收集历史数据
+            history_data.append(current_data)
             
-            if len(history) < lookback_periods:
-                continue  # 等待足够的历史数据
-
+            # 如果还没到用户指定的开始时间，继续收集数据但不执行策略
+            if current_time < self.backtest_start_time:
+                continue
+                
+            # 确保有足够的历史数据后再开始交易
+            if is_warmup and len(history_data) < self.strategy.lookback_periods:
+                continue
+                
+            is_warmup = False  # 预热结束
+            
+            # 创建历史数据的DataFrame
+            history = pd.DataFrame(history_data[-self.strategy.lookback_periods:])
+            
             # 获取策略信号
             signal = self.strategy.on_data(current_data, history)
             
@@ -72,17 +90,21 @@ class Backtest:
             # 计算当前权益和收益率
             current_equity = self._calculate_equity(current_data['close'])
             returns_pct = (current_equity - self.initial_capital) / self.initial_capital * 100
-
-            # 记录权益
+            
+            # 记录权益曲线
             self.equity_curve.append({
                 'timestamp': current_time,
-                'equity': current_equity if self.position > 0 else self.capital,  # 只在有持仓时计算权益
+                'equity': current_equity,
                 'position': self.position,
                 'returns_pct': returns_pct
             })
         
+        # 添加日志输出，帮助调试
+        self.logger.info(f"Collected {len(history_data)} data points")
+        self.logger.info(f"Generated {len(self.equity_curve)} equity curve points")
+        
         if not self.equity_curve:
-            raise ValueError("No data processed during backtest")
+            raise ValueError(f"No data processed during backtest. Start: {self.start_time}, End: {self.end_time}")
         
         # 转换为DataFrame并设置索引
         equity_df = pd.DataFrame(self.equity_curve)
@@ -320,48 +342,93 @@ class Backtest:
 
     def get_annual_return(self) -> float:
         """计算年化收益率"""
-        if not self.equity_curve:
-            return 0
-        
-        equity_df = pd.DataFrame(self.equity_curve)
-        # 确保使用 datetime 对象进行计算
-        start_date = pd.to_datetime(equity_df.index[0])
-        end_date = pd.to_datetime(equity_df.index[-1])
-        total_days = (end_date - start_date).days
-        
-        if total_days == 0:
-            return 0
+        try:
+            if len(self.equity_curve) == 0:
+                return 0.0
             
-        total_return = (equity_df['equity'].iloc[-1] / self.initial_capital - 1)
-        annual_return = (1 + total_return) ** (365 / total_days) - 1
-        return annual_return * 100
+            equity_df = self._get_equity_df()
+            initial_equity = equity_df['equity'].iloc[0]
+            final_equity = equity_df['equity'].iloc[-1]
+            
+            # 计算实际交易天数
+            total_days = (equity_df.index[-1] - equity_df.index[0]).days
+            if total_days < 1:  # 如果不足1天，按1天计算
+                total_days = 1
+            
+            # 计算总收益率
+            total_return = (final_equity - initial_equity) / initial_equity
+            
+            # 计算年化收益率
+            annual_return = ((1 + total_return) ** (365 / total_days) - 1) * 100
+            
+            return annual_return
+        
+        except (ZeroDivisionError, IndexError) as e:
+            self.logger.error(f"Error calculating annual return: {str(e)}")
+            return 0.0
+
+    def _get_equity_df(self) -> pd.DataFrame:
+        """将 equity_curve 列表转换为 DataFrame"""
+        if not self.equity_curve:
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(self.equity_curve)
+        df.set_index('timestamp', inplace=True)
+        return df
 
     def get_max_drawdown(self) -> float:
         """计算最大回撤"""
-        if not self.equity_curve:
-            return 0
+        try:
+            if len(self.equity_curve) == 0:
+                return 0.0
             
-        equity_df = pd.DataFrame(self.equity_curve)
-        rolling_max = equity_df['equity'].expanding().max()
-        drawdowns = (equity_df['equity'] - rolling_max) / rolling_max * 100
-        return abs(float(drawdowns.min()))
+            # 转换为 DataFrame
+            equity_df = self._get_equity_df()
+            
+            # 计算累计最大值
+            rolling_max = equity_df['equity'].expanding().max()
+            # 计算回撤
+            drawdown = (equity_df['equity'] - rolling_max) / rolling_max * 100
+            # 获取最大回撤
+            max_drawdown = abs(drawdown.min())
+            return max_drawdown
+        except (ZeroDivisionError, ValueError) as e:
+            self.logger.error(f"Error calculating max drawdown: {str(e)}")
+            return 0.0
 
     def get_sharpe_ratio(self) -> float:
         """计算夏普比率"""
-        if not self.equity_curve:
-            return 0
+        try:
+            if len(self.equity_curve) == 0:
+                return 0.0
             
-        equity_df = pd.DataFrame(self.equity_curve)
-        returns = equity_df['equity'].pct_change().dropna()
-        if len(returns) == 0 or returns.std() == 0:
-            return 0
+            equity_df = self._get_equity_df()
+            returns = equity_df['returns_pct'].dropna()
             
-        return (returns.mean() / returns.std()) * (252 ** 0.5)  # 年化
+            if len(returns) == 0:
+                return 0.0
+            
+            avg_return = returns.mean()
+            std_return = returns.std()
+            
+            if std_return == 0:
+                return 0.0
+            
+            risk_free_rate = 0
+            sharpe = (avg_return - risk_free_rate) / std_return * np.sqrt(252)
+            return sharpe
+        except (ZeroDivisionError, ValueError) as e:
+            self.logger.error(f"Error calculating Sharpe ratio: {str(e)}")
+            return 0.0
 
     def get_win_rate(self) -> float:
         """计算胜率"""
-        if not self.trades:
-            return 0
+        try:
+            if len(self.trades) == 0:
+                return 0.0
             
-        winning_trades = sum(1 for trade in self.trades if trade.pnl > 0)
-        return (winning_trades / len(self.trades)) * 100 
+            winning_trades = sum(1 for trade in self.trades if trade.pnl > 0)
+            win_rate = (winning_trades / len(self.trades)) * 100
+            return win_rate
+        except ZeroDivisionError:
+            return 0.0 

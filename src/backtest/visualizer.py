@@ -124,7 +124,7 @@ class BacktestVisualizer:
         max_drawdown = drawdowns.min()
         
         # 计算年化收益率
-        days = (self.equity_curve.index[-1] - self.equity_curve.index[0]).days
+        days = max((self.equity_curve.index[-1] - self.equity_curve.index[0]).days, 1)
         annual_return = (((final_equity / initial_equity) ** (365 / days)) - 1) * 100
         
         stats['Total Return (%)'] = returns

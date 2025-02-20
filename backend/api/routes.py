@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, APIRouter
 from pydantic import BaseModel
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 import sys
 import os
@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from src.backtest.data_feed import DataFeed
 from src.backtest.engine import Backtest
 from src.backtest.strategy import SMAWithADXStrategy
+from src.utils.logger import setup_logger
 
 router = APIRouter()
 
@@ -42,56 +43,71 @@ STRATEGY_MAP = {
 
 NO_NEED_RESAMPLE_INTERVALS = ['1m', '5m' , '15m', '1h', '1d']
 
-def get_start_time(end, interval):
-    # Convert interval string to minutes
+def get_lookback_period(interval: str) -> int:
+    """
+    根据时间间隔获取合适的回看周期
+    
+    Args:
+        interval: 时间间隔 (1m, 5m, 15m, 1h, 4h, 1d 等)
+        
+    Returns:
+        回看天数
+    """
+    # 将时间间隔转换为分钟
     interval_map = {
-        '1m': 1,
-        '5m': 5,
-        '15m': 15,
-        '30m': 30,
-        '1h': 60,
-        '4h': 240,
-        '1d': 1440,
-        '1w': 10080,
-        '1M': 43200
+        'm': 1,
+        'h': 60,
+        'd': 1440,
+        'w': 10080,
     }
     
-    # 确保 end 是 datetime 对象
-    if isinstance(end, str):
-        end = datetime.strptime(end, '%Y-%m-%d %H:%M:%S')
+    unit = interval[-1]  # 获取单位 (m/h/d/w)
+    number = int(interval[:-1])  # 获取数字
+    interval_minutes = number * interval_map[unit]
     
-    interval_minutes = interval_map.get(interval, 1)
-    # Calculate bars needed based on interval
-    if interval_minutes < 60:  # For minute-based intervals
-        lookback_bars = 1000
-    elif interval_minutes < 240:  # For hourly intervals
-        lookback_bars = 500
-    else:  # For daily and larger intervals
-        lookback_bars = 200
-        
-    # Calculate start time based on interval and number of bars
-    start = end - timedelta(minutes=interval_minutes * lookback_bars)
-    return start
+    # 根据不同的时间间隔设置不同的回看周期
+    if interval_minutes <= 60:  # 小时级别及以下
+        return 3  # 3天数据用于计算指标
+    elif interval_minutes <= 240:  # 4小时及以下
+        return 7  # 7天数据
+    elif interval_minutes <= 1440:  # 日线
+        return 30  # 30天数据
+    else:  # 周线及以上
+        return 90  # 90天数据
 
 @router.post("/api/backtest", response_model=BacktestResult)
 async def run_backtest(request: BacktestRequest):
+    logger = setup_logger('backtest_api')
     try:
-        # 处理日期字符串，移除时区信息
-        start_time = datetime.strptime(request.startTime.split('T')[0], '%Y-%m-%d')
-        end_time = datetime.strptime(request.endTime.split('T')[0], '%Y-%m-%d')
+        # 处理日期字符串并确保UTC时区
+        def parse_datetime(dt_str: str) -> datetime:
+            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
         
-        # 确保有足够的历史数据来计算指标
-        LOOKBACK_DAYS = 20
-        start_time_with_buffer = start_time - timedelta(days=LOOKBACK_DAYS)
+        start_time = parse_datetime(request.startTime)
+        end_time = parse_datetime(request.endTime)
         
-        # 创建数据源
+        logger.info(f"Parsed times - Start: {start_time}, End: {end_time}")
+        
+        # 获取回看周期
+        lookback_days = get_lookback_period(request.interval)
+        logger.info(f"Lookback days for {request.interval}: {lookback_days}")
+        
+        # 获取包含预热期的数据
+        data_start = start_time - timedelta(days=lookback_days)
+        logger.info(f"Data start time with lookback: {data_start}")
+        
         data_feed = DataFeed.from_database(
             symbol=request.symbol,
             interval=request.interval,
-            start_time=start_time_with_buffer,
+            start_time=data_start,
             end_time=end_time,
-            resample_from_1m=True
+            resample_from_1m=request.interval not in NO_NEED_RESAMPLE_INTERVALS
         )
+        
+        logger.info(f"Loaded {len(data_feed.data)} data points")
         
         # 获取策略类
         strategy_class = STRATEGY_MAP.get(request.strategyId)
@@ -101,11 +117,11 @@ async def run_backtest(request: BacktestRequest):
             
         strategy = strategy_class(**request.params)
         
-        # 创建回测实例 - 使用原始的开始时间
+        # 创建回测实例 - 使用用户选择的开始时间
         backtest = Backtest(
             data_feed=data_feed,
             strategy=strategy,
-            start_time=start_time,
+            start_time=start_time,  # 用户选择的开始时间
             end_time=end_time,
             initial_capital=request.initialCapital,
             enable_report=False
@@ -173,11 +189,27 @@ async def get_historical_data(
         else:
             end = datetime.now() - timedelta(days=1)
             
+        # 计算开始时间（根据limit和interval计算）
+        interval_minutes = {
+            'm': 1,
+            'h': 60,
+            'd': 1440,
+            'w': 10080,
+        }
+        
+        unit = interval[-1]  # 获取单位 (m/h/d/w)
+        number = int(interval[:-1])  # 获取数字
+        minutes_per_candle = number * interval_minutes[unit]
+        
+        # 计算需要往前推多少时间
+        total_minutes = minutes_per_candle * limit
+        start = end - timedelta(minutes=total_minutes)
+            
         # 从数据库获取数据
         data_feed = DataFeed.from_database(
             symbol=symbol,
             interval=interval,
-            start_time=get_start_time(end_time, interval),  # 向前获取limit根K线
+            start_time=start,
             end_time=end,
             resample_from_1m=interval not in NO_NEED_RESAMPLE_INTERVALS
         )

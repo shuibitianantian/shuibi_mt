@@ -31,93 +31,91 @@ class BinanceDataDownloader:
         interval: str,
         start_time: str,
         end_time: str,
+        save_path: str = '',
         save_to_db: bool = True
     ) -> pd.DataFrame:
-        """下载历史K线数据"""
-        try:
-            start_ts = self._convert_time_to_timestamp(start_time)
-            end_ts = self._convert_time_to_timestamp(end_time)
-            all_data = []
-            total_downloaded = 0
-            total_saved = 0
-            batch_count = 0
+        """
+        下载历史K线数据
+        
+        Args:
+            symbol: 交易对
+            interval: K线间隔
+            start_time: 开始时间 (YYYY-MM-DD)
+            end_time: 结束时间 (YYYY-MM-DD)
+            save_path: CSV保存路径
+            save_to_db: 是否保存到数据库
             
-            while start_ts < end_ts:
-                batch_count += 1
-                
-                # 使用期货API获取K线数据
+        Returns:
+            包含K线数据的DataFrame
+        """
+        try:
+            # 转换时间字符串为UTC时间戳
+            start_ts = int(pd.Timestamp(start_time).tz_localize('UTC').timestamp() * 1000)
+            end_ts = int(pd.Timestamp(end_time).tz_localize('UTC').timestamp() * 1000)
+            
+            self.logger.info(f"Downloading {symbol} {interval} data from {start_time} to {end_time}")
+            
+            # 存储所有K线数据
+            all_klines = []
+            current_start = start_ts
+            
+            while current_start < end_ts:
+                # 获取一批K线数据
                 klines = self.client.klines(
                     symbol=symbol,
                     interval=interval,
-                    startTime=start_ts,
+                    startTime=current_start,
                     endTime=end_ts,
                     limit=1000
                 )
                 
                 if not klines:
                     break
+                    
+                all_klines.extend(klines)
                 
-                # 转换为DataFrame
-                df = pd.DataFrame(klines, columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'close_time', 'quote_asset_volume', 'number_of_trades',
-                    'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-                ])
+                # 更新开始时间为最后一根K线的收盘时间
+                current_start = klines[-1][6]  # close_time
                 
-                # 处理数据类型
-                # 将毫秒时间戳转换为UTC时间
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
-                
-                for col in ['open', 'high', 'low', 'close', 'volume', 'quote_asset_volume',
-                           'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume']:
-                    df[col] = df[col].astype(float)
-                df['number_of_trades'] = df['number_of_trades'].astype(int)
-                
-                # 设置索引
-                df.set_index('timestamp', inplace=True)
-                
-                batch_size = len(df)
-                total_downloaded += batch_size
-                
-                # 立即保存到数据库
-                if save_to_db:
-                    before_count = self.db.get_record_count(symbol, interval)
-                    start_time, end_time, skipped_count, saved_count = self.db.save_kline_data(df, symbol, interval)
-                    self.logger.info(
-                        f"Saved {saved_count} records from {start_time} to {end_time}"
-                        + (f" (Skipped {skipped_count})" if skipped_count > 0 else "")
-                    )
-                    after_count = self.db.get_record_count(symbol, interval)
-                    saved_count = after_count - before_count
-                    total_saved += saved_count
-                    skipped = batch_size - saved_count
-                
-                # 保存数据用于返回
-                all_data.append(df)
-                
-                # 更新开始时间为最后一条数据的时间
-                start_ts = klines[-1][0] + 1
-                
-                # 添加延时避免触发限制
+                # 添加小延迟避免触发限制
                 time.sleep(0.1)
             
-            if not all_data:
-                raise ValueError("No data downloaded")
+            if not all_klines:
+                self.logger.warning(f"No data found for {symbol} from {start_time} to {end_time}")
+                return pd.DataFrame()
             
-            # 合并所有数据
-            final_df = pd.concat(all_data)
+            # 转换为DataFrame
+            df = pd.DataFrame(all_klines, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_asset_volume', 'number_of_trades',
+                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+            ])
             
-            # 打印总结信息
-            if save_to_db and total_downloaded > 0:
-                skipped = total_downloaded - total_saved
-                self.logger.info(
-                    f"Total batches: {batch_count} | "
-                    f"Total downloaded: {total_downloaded} | "
-                    f"Total saved: {total_saved} | "
-                    f"Total skipped: {skipped} | "
-                )
+            # 转换时间戳为UTC时间
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
             
-            return final_df
+            # 转换数据类型
+            numeric_columns = ['open', 'high', 'low', 'close', 'volume',
+                             'quote_asset_volume', 'taker_buy_base_asset_volume',
+                             'taker_buy_quote_asset_volume']
+            df[numeric_columns] = df[numeric_columns].astype(float)
+            df['number_of_trades'] = df['number_of_trades'].astype(int)
+            
+            # 设置索引
+            df.set_index('timestamp', inplace=True)
+            
+            # 保存到CSV
+            if save_path:
+                filename = f"{save_path}/{symbol}_{interval}_{start_time}_{end_time}.csv"
+                df.to_csv(filename)
+                self.logger.info(f"Data saved to {filename}")
+            
+            # 保存到数据库
+            if save_to_db:
+                self.db.save_kline_data(df, symbol, interval)
+            
+            self.logger.info(f"Downloaded {len(df)} klines")
+            return df
         
         except Exception as e:
             self.logger.error(f"Error downloading data: {str(e)}")

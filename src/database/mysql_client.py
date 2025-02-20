@@ -293,11 +293,16 @@ class MySQLClient:
             self.logger.error(f"Error resampling data: {str(e)}")
             raise
 
-    def execute_query(self, query: str):
+    def execute_query(self, query):
         """执行SQL查询并返回结果"""
         try:
             with self.engine.connect() as conn:
-                cursor = conn.execute(text(query))
+                # 如果是 TextClause 对象，直接使用
+                if hasattr(query, 'text'):
+                    cursor = conn.execute(query)
+                else:
+                    # 如果是字符串，转换为 TextClause
+                    cursor = conn.execute(text(query))
                 return cursor.fetchall()
         except Exception as e:
             raise Exception(f"Database query failed: {str(e)}") 

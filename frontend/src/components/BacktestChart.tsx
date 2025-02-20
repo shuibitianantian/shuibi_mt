@@ -9,9 +9,10 @@ import {
   Select,
   Statistic,
   Tooltip,
+  message,
 } from "antd";
 import dayjs from "dayjs";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { BacktestConfig, BacktestResult } from "../types/strategy";
 import { useChart } from "./chart/hooks/useChart";
 import { LoadingSpinner } from "./chart/LoadingSpinner";
@@ -49,24 +50,33 @@ export const BacktestChart = () => {
   const [drawerVisible, setDrawerVisible] = useState(false);
 
   const handleSubmit = async (config: BacktestConfig) => {
+    setIsLoadingBacktest(true);
     try {
-      setIsLoadingBacktest(true);
+      console.log(new Date((selectedRange?.start || 0) * 1000).toISOString());
       const response = await fetch("http://localhost:8000/api/backtest", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(config),
+        body: JSON.stringify({
+          ...config,
+          symbol: "BTCUSDT",
+          startTime: new Date((selectedRange?.start || 0) * 1000).toISOString(),
+          endTime: new Date((selectedRange?.end || 0) * 1000).toISOString(),
+        }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to run backtest");
+        const errorData = await response.json();
+        message.error(errorData.detail || "Failed to run backtest");
+        return;
       }
 
-      const result = await response.json();
-      setBacktestResult(result);
+      const data = await response.json();
+      setBacktestResult(data);
+      setDrawerVisible(false);
     } catch (error) {
-      console.error("Error running backtest:", error);
+      message.error("Network error occurred");
     } finally {
       setIsLoadingBacktest(false);
     }
@@ -75,7 +85,7 @@ export const BacktestChart = () => {
   return (
     <div style={{ width: "100%" }}>
       {backtestResult !== null && (
-        <Row gutter={[8, 8]} style={{ marginBottom: 8 }}>
+        <Row gutter={[8, 8]} style={{ marginBottom: 24 }}>
           <Col span={4}>
             <Card size="small">
               <Statistic
@@ -199,7 +209,12 @@ export const BacktestChart = () => {
                 allowClear={false}
               />
               <Tooltip title="backtest">
-                <Button icon={<FundTwoTone />} size="small" type="text" />
+                <Button
+                  icon={<FundTwoTone />}
+                  size="small"
+                  type="text"
+                  onClick={() => setDrawerVisible(true)}
+                />
               </Tooltip>
               <CloseSquareFilled
                 style={{
@@ -236,7 +251,7 @@ export const BacktestChart = () => {
       <Drawer
         title="Strategy Settings"
         placement="right"
-        width={400}
+        width={600}
         onClose={() => setDrawerVisible(false)}
         open={drawerVisible}
       >

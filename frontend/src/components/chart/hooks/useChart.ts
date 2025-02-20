@@ -220,12 +220,16 @@ export const useChart = ({
       legendRef.current = document.createElement("div");
       const legend = legendRef.current;
       legend.style.position = "absolute";
-      legend.style.left = "50px"; // 固定在左侧
-      legend.style.padding = "8px";
+      legend.style.padding = "12px";
       legend.style.fontSize = "12px";
-      legend.style.background = "rgba(255, 255, 255, 0.9)";
+      legend.style.background = "rgba(255, 255, 255, 0.95)";
+      legend.style.border = "1px solid rgba(0, 0, 0, 0.1)";
+      legend.style.borderRadius = "6px";
+      legend.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
       legend.style.pointerEvents = "none";
       legend.style.zIndex = "3";
+      legend.style.display = "none";
+      legend.style.minWidth = "200px";
       chartContainerRef.current.appendChild(legend);
 
       chartRef.current.subscribeCrosshairMove((param) => {
@@ -241,45 +245,115 @@ export const useChart = ({
           if (price) {
             const color = price.close >= price.open ? "#26a69a" : "#ef5350";
             legend.innerHTML = `
-                <span>O <span style="color: ${color};width:56px;display:inline-block;">${price.open.toFixed(
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="background: rgba(0, 0, 0, 0.02); padding: 8px; border-radius: 4px;">
+                  <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+                    <div style="display: flex; justify-content: space-between; min-width: 20px;">
+                      <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">Open</span>
+                      <span style="color: ${color}; font-family: monospace;">${price.open.toFixed(
               2
-            )}</span></span>
-                <span>H <span style="color: ${color};width:56px;display:inline-block;">${price.high.toFixed(
-              2
-            )}</span></span>
-                <span>L <span style="color: ${color};width:56px;display:inline-block;">${price.low.toFixed(
-              2
-            )}</span></span>
-                <span>C <span style="color: ${color};width:56px;display:inline-block;">${price.close.toFixed(
-              2
-            )}</span></span>
-                ${
-                  equity
-                    ? `
-                    <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #eee;">
-                        <div style="color: rgba(41, 98, 255, 0.8)">
-                            Position: ${equity.position.toFixed(3)} BTC
-                        </div>
+            )}</span>
                     </div>
-                `
-                    : ""
-                }
+                    <div style="display: flex; justify-content: space-between; min-width: 20px;">
+                      <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">High</span>
+                      <span style="color: ${color}; font-family: monospace;">${price.high.toFixed(
+              2
+            )}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; min-width: 20px;">
+                      <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">Low</span>
+                      <span style="color: ${color}; font-family: monospace;">${price.low.toFixed(
+              2
+            )}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; min-width: 20px;">
+                      <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">Close</span>
+                      <span style="color: ${color}; font-family: monospace;">${price.close.toFixed(
+              2
+            )}</span>
+                    </div>
+                  </div>
+                  ${
+                    equity
+                      ? `
+                      <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0, 0, 0, 0.06);">
+                        <div style="display: flex; justify-content: space-between; min-width: 260px;">
+                          <span style="color: rgba(0, 0, 0, 0.45)">Position</span>
+                          <span style="color: rgba(41, 98, 255, 0.8); font-family: monospace;">
+                            ${equity.position.toFixed(3)} BTC
+                          </span>
+                        </div>
+                      </div>
+                      `
+                      : ""
+                  }
+                </div>
                 ${
                   trade
                     ? `
-                    <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #eee;">
-                        <div style="color: ${
-                          trade.action === "BUY" ? "#26a69a" : "#ef5350"
-                        }">
-                            ${trade.action} @ ${trade.price.toFixed(2)}
-                            <br/>Size: ${trade.size.toFixed(3)} BTC
-                            <br/>PnL: $${trade.pnl.toFixed(2)}
+                    <div style="background: ${
+                      trade.action === "BUY"
+                        ? "rgba(38, 166, 154, 0.1)"
+                        : "rgba(239, 83, 80, 0.1)"
+                    }; padding: 8px; border-radius: 4px;">
+                      <div style="color: ${
+                        trade.action === "BUY" ? "#26a69a" : "#ef5350"
+                      }">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px; min-width: 260px;">
+                          <span style="margin-right: 12px;">${
+                            trade.action
+                          }</span>
+                          <span style="font-family: monospace;">${trade.price.toFixed(
+                            2
+                          )}</span>
                         </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px; min-width: 260px;">
+                          <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">Size</span>
+                          <span style="font-family: monospace;">${trade.size.toFixed(
+                            3
+                          )} BTC</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; min-width: 260px;">
+                          <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">PnL</span>
+                          <span style="color: ${
+                            trade.pnl >= 0 ? "#26a69a" : "#ef5350"
+                          }; font-family: monospace;">
+                            ${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                `
+                    `
                     : ""
                 }
+              </div>
             `;
+
+            // 更新 legend 位置
+            const container =
+              chartContainerRef.current?.getBoundingClientRect();
+            if (container) {
+              const x = param.point.x + 20;
+              const y = param.point.y + 20;
+
+              const legendWidth = legend.offsetWidth;
+              const legendHeight = legend.offsetHeight;
+
+              let finalX = x;
+              let finalY = y;
+
+              if (x + legendWidth > container.width) {
+                finalX = x - legendWidth - 40;
+              }
+
+              if (y + legendHeight > container.height) {
+                finalY = y - legendHeight - 40;
+              }
+
+              legend.style.left = `${finalX}px`;
+              legend.style.top = `${finalY}px`;
+            }
+
             legend.style.display = "block";
           }
         } else {
@@ -354,7 +428,7 @@ export const useChart = ({
         }
       };
     }
-  }, [setupScrollHandler]);
+  }, [setupScrollHandler, data]);
 
   // 添加窗口大小变化的处理
   useEffect(() => {
