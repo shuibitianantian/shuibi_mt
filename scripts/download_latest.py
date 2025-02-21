@@ -11,6 +11,7 @@ sys.path.append(root_path)
 from src.data_downloader.binance_client import BinanceDataDownloader
 from src.database.mysql_client import MySQLClient
 from src.utils.logger import setup_logger
+from src.data_downloader.download_status import DownloadStatus
 
 def get_latest_timestamp(db_client: MySQLClient, symbol: str, interval: str) -> datetime:
     """获取数据库中最新的数据时间"""
@@ -80,11 +81,9 @@ def download_latest_data():
                     if df is not None and not df.empty:
                         logger.info(f"Downloaded {interval} data from {current_start} to {current_end}, "
                                   f"records: {len(df)}")
-                        current_start = current_end
                         retry_count = 0  # 重置重试计数
-                    else:
-                        raise Exception("Downloaded DataFrame is empty")
                     
+                    current_start = current_end
                     # 添加延时以避免触发频率限制
                     time.sleep(0.5)
                     
@@ -108,10 +107,18 @@ def download_latest_data():
 
 def main():
     logger = setup_logger('latest_downloader')
+    task_id = sys.argv[1] if len(sys.argv) > 1 else None
+    status = DownloadStatus() if task_id else None
+    
     try:
         download_latest_data()
+        if status and task_id:
+            logger.info(f"Download completed for task {task_id}")
+            status.complete(task_id)
     except Exception as e:
         logger.error(f"Fatal error in main: {str(e)}")
+        if status and task_id:
+            status.fail(task_id, str(e))
 
 if __name__ == "__main__":
     main() 

@@ -48,13 +48,12 @@ class Backtest:
         
     def run(self) -> pd.DataFrame:
         """运行回测"""
-        if self.enable_report:
-            self.logger.info(f"Starting backtest from {self.start_time} to {self.end_time}...")
+        self.logger.info(f"Starting backtest from {self.start_time} to {self.end_time}...")
         
         # 用于累积历史数据的列表
         history_data = []
         is_warmup = True  # 标记是否在预热阶段
-        
+
         while True:
             current_data = self.data.next()
             if current_data is None:
@@ -201,7 +200,7 @@ class Backtest:
             # 计算这笔交易的收益
             entry_value = self.position_cost * actual_size  # 买入成本
             exit_value = price * actual_size * (1 - self.commission)  # 卖出所得（扣除手续费）
-            pnl = exit_value - entry_value
+            pnl = (exit_value - entry_value) / entry_value * 100
             
             # 更新资金和持仓
             self.capital += exit_value
@@ -431,4 +430,14 @@ class Backtest:
             win_rate = (winning_trades / len(self.trades)) * 100
             return win_rate
         except ZeroDivisionError:
-            return 0.0 
+            return 0.0
+
+    def get_stats(self) -> Dict[str, float]:
+        """获取回测统计数据"""
+        return {
+            'Total Return (%)': float(self.equity_curve[-1]['returns_pct']),
+            'Annual Return (%)': float(self.get_annual_return()),
+            'Max Drawdown (%)': float(self.get_max_drawdown()),
+            'Sharpe Ratio': float(self.get_sharpe_ratio()),
+            'Win Rate (%)': float(self.get_win_rate())
+        } 

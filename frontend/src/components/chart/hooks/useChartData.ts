@@ -12,7 +12,7 @@ export const useChartData = (
   const oldestTimestampRef = useRef<string | null>(null);
 
   const loadData = useCallback(
-    async (timestamp: string) => {
+    async (timestamp: string, keepPreviousData = true) => {
       if (candlestickSeriesRef && !isLoadingRef.current) {
         isLoadingRef.current = true;
         setLoading(() => true);
@@ -26,7 +26,7 @@ export const useChartData = (
         if (newData.price_data.length > 0) {
           oldestTimestampRef.current = newData.price_data[0].timestamp;
           const formattedData = newData.price_data.map((item: any) => ({
-            time: (new Date(item.timestamp).getTime() / 1000) as Time,
+            time: (new Date(item.timestamp + "Z").getTime() / 1000) as Time,
             open: item.open,
             high: item.high,
             low: item.low,
@@ -34,10 +34,20 @@ export const useChartData = (
             volume: item.volume,
           }));
 
-          candlestickSeriesRef.current.setData([
-            ...formattedData,
-            ...candlestickSeriesRef.current.data(),
-          ]);
+          const previousData = keepPreviousData
+            ? candlestickSeriesRef.current.data()
+            : [];
+
+          // 合并数据并去重
+          const allData = [...formattedData, ...previousData];
+          const uniqueData = Array.from(
+            new Map(allData.map((item) => [item.time, item])).values()
+          );
+
+          // 按时间排序
+          uniqueData.sort((a, b) => a.time - b.time);
+
+          candlestickSeriesRef.current.setData(uniqueData);
         }
         isLoadingRef.current = false;
         setLoading(() => false);
@@ -83,5 +93,5 @@ export const useChartData = (
     [loadData]
   );
 
-  return { loadData, setupScrollHandler };
+  return { loadData, setupScrollHandler, oldestTimestampRef };
 };

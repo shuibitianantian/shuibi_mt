@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 import sys
 import os
+import pandas as pd
+import subprocess
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -12,6 +14,7 @@ from src.backtest.data_feed import DataFeed
 from src.backtest.engine import Backtest
 from src.backtest.strategy import SMAWithADXStrategy
 from src.utils.logger import setup_logger
+from src.data_downloader.download_status import DownloadStatus  # 添加一个状态管理类
 
 router = APIRouter()
 
@@ -79,25 +82,48 @@ def get_lookback_period(interval: str) -> int:
 async def run_backtest(request: BacktestRequest):
     logger = setup_logger('backtest_api')
     try:
-        # 处理日期字符串并确保UTC时区
         def parse_datetime(dt_str: str) -> datetime:
-            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
+            # 直接解析 ISO 格式的时间字符串
+            return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
         
         start_time = parse_datetime(request.startTime)
         end_time = parse_datetime(request.endTime)
         
         logger.info(f"Parsed times - Start: {start_time}, End: {end_time}")
+
+        # 获取策略类
+        strategy_class = STRATEGY_MAP.get(request.strategyId)
+        if not strategy_class:
+            raise HTTPException(status_code=400, detail=f"Strategy {request.strategyId} not found")
+            
+        strategy = strategy_class(**request.params)
         
-        # 获取回看周期
-        lookback_days = get_lookback_period(request.interval)
-        logger.info(f"Lookback days for {request.interval}: {lookback_days}")
+        # 根据策略和时间间隔计算需要的预热数据量
+        def calculate_lookback_time(interval: str, periods: int) -> timedelta:
+            """根据时间间隔和所需周期数计算回看时间"""
+            interval_map = {
+                'm': timedelta(minutes=1),
+                'h': timedelta(hours=1),
+                'd': timedelta(days=1),
+                'w': timedelta(weeks=1),
+            }
+            
+            unit = interval[-1]
+            number = int(interval[:-1])
+            base_delta = interval_map[unit] * number
+            
+            return base_delta * periods
+            
+        # 计算需要的预热时间
+        lookback_time = calculate_lookback_time(request.interval, strategy.lookback_periods)
+        # 添加一些额外的缓冲时间
+        lookback_time = lookback_time * 1.2  # 或其他合适的倍数
+        
+        logger.info(f"Strategy requires {strategy.lookback_periods} periods lookback")
+        logger.info(f"Calculated lookback time: {lookback_time}")
         
         # 获取包含预热期的数据
-        data_start = start_time - timedelta(days=lookback_days)
-        logger.info(f"Data start time with lookback: {data_start}")
+        data_start = start_time - lookback_time
         
         data_feed = DataFeed.from_database(
             symbol=request.symbol,
@@ -108,14 +134,6 @@ async def run_backtest(request: BacktestRequest):
         )
         
         logger.info(f"Loaded {len(data_feed.data)} data points")
-        
-        # 获取策略类
-        strategy_class = STRATEGY_MAP.get(request.strategyId)
-        
-        if not strategy_class:
-            raise HTTPException(status_code=400, detail=f"Strategy {request.strategyId} not found")
-            
-        strategy = strategy_class(**request.params)
         
         # 创建回测实例 - 使用用户选择的开始时间
         backtest = Backtest(
@@ -130,26 +148,31 @@ async def run_backtest(request: BacktestRequest):
         # 运行回测
         equity_df = backtest.run()
         
+        # 只返回回测时间范围内的数据
+        mask = (data_feed.data.index >= start_time) & (data_feed.data.index <= end_time)
+        backtest_data = data_feed.data[mask]
+        
         # 格式化结果
         result = {
             "equity": [
                 {
                     "timestamp": index.strftime('%Y-%m-%dT%H:%M:%S'),
-                    "equity": row['equity'],
-                    "position": row['position'],
-                    "returns_pct": row['returns_pct']
+                    "equity": row["equity"],
+                    "position": row["position"]
                 }
                 for index, row in equity_df.iterrows()
             ],
             "trades": [
-                Trade(
-                    timestamp=trade.timestamp.strftime('%Y-%m-%dT%H:%M:%S'),
-                    action=trade.action,
-                    price=trade.price,
-                    size=trade.size,
-                    pnl=trade.pnl
-                ) for trade in backtest.trades
+                {
+                    "timestamp": trade.timestamp.strftime('%Y-%m-%dT%H:%M:%S'),
+                    "action": trade.action,
+                    "price": trade.price,
+                    "size": trade.size,
+                    "pnl": trade.pnl
+                }
+                for trade in backtest.trades
             ],
+            "stats": backtest.get_stats(),
             "price_data": [
                 {
                     "timestamp": index.strftime('%Y-%m-%dT%H:%M:%S'),
@@ -159,21 +182,25 @@ async def run_backtest(request: BacktestRequest):
                     "close": row['close'],
                     "volume": row['volume']
                 }
-                for index, row in data_feed.data.iterrows()
-            ],
-            "stats": {
-                'Total Return (%)': float(equity_df['returns_pct'].iloc[-1]),
-                'Annual Return (%)': float(backtest.get_annual_return()),
-                'Max Drawdown (%)': float(backtest.get_max_drawdown()),
-                'Sharpe Ratio': float(backtest.get_sharpe_ratio()),
-                'Win Rate (%)': float(backtest.get_win_rate())
-            }
+                for index, row in backtest_data.iterrows()
+            ]
         }
         
         return result
-        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # 返回空结果而不是抛出错误
+        return {
+            "trades": [],
+            "equity": [],
+            "price_data": [],
+            "stats": {
+                "Total Return (%)": 0,
+                "Annual Return (%)": 0,
+                "Max Drawdown (%)": 0,
+                "Sharpe Ratio": 0,
+                "Win Rate (%)": 0,
+            }
+        }
 
 @router.get("/api/historical/{symbol}")
 async def get_historical_data(
@@ -217,7 +244,7 @@ async def get_historical_data(
         return {
             "price_data": [
                 {
-                    "timestamp": index.strftime('%Y-%m-%d %H:%M:%S'),
+                    "timestamp": index.strftime('%Y-%m-%dT%H:%M:%S'),
                     "open": row['open'],
                     "high": row['high'],
                     "low": row['low'],
@@ -228,4 +255,26 @@ async def get_historical_data(
             ]
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        return {
+            "price_data": []
+        }
+
+download_status = DownloadStatus()
+
+@router.post("/api/download-latest")
+async def start_download():
+    try:
+        # 设置下载状态为进行中
+        taskId = download_status.start()
+        # 异步执行下载脚本，并传入状态ID
+        subprocess.Popen([sys.executable, "../scripts/download_latest.py", str(taskId)])
+        return {"taskId": taskId}
+    except Exception as e:
+        # 修复错误处理的调用
+        download_status.fail(taskId, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/api/download-status/{task_id}")
+async def get_download_status(task_id: str):
+    status = download_status.get_status(task_id)
+    return status 

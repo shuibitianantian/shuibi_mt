@@ -1,10 +1,15 @@
 import {
-  ColorType,
   createChart,
   IChartApi,
   SeriesMarker,
   SeriesMarkerPosition,
   Time,
+  CrosshairMode,
+  LineStyle,
+  PriceFormat,
+  ChartOptions,
+  DeepPartial,
+  CrosshairOptions,
 } from "lightweight-charts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BacktestResult } from "types/strategy";
@@ -18,6 +23,7 @@ interface IUseChartProps {
     setRangeSelection: (range: { start: number; end: number } | null) => void;
   };
   interval: string;
+  setHighlightedTradeTime: (time: string | null) => void;
 }
 
 interface ChartMarker extends SeriesMarker<Time> {
@@ -32,6 +38,7 @@ export const useChart = ({
   data,
   selectRangeConfig,
   interval,
+  setHighlightedTradeTime,
 }: IUseChartProps) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -41,8 +48,10 @@ export const useChart = ({
   const selectionEndRef = useRef<number | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const hasUsedInitialDataRef = useRef(false);
+  const markerTooltipRef = useRef<HTMLDivElement | null>(null);
 
-  const { loadData, setupScrollHandler } = useChartData(
+  const { loadData, setupScrollHandler, oldestTimestampRef } = useChartData(
     candlestickSeriesRef,
     interval,
     setIsLoading
@@ -50,6 +59,7 @@ export const useChart = ({
 
   const formatTime = useCallback((time: number, interval: string) => {
     const date = new Date(time * 1000);
+
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, "0");
     const day = date.getDate().toString().padStart(2, "0");
@@ -84,77 +94,103 @@ export const useChart = ({
     }
   }, [selectRangeConfig]);
 
+  const loadInitialData = useCallback(() => {
+    const today = dayjs().format("YYYY-MM-DD HH:mm:ss");
+    loadData(today);
+  }, [loadData]);
+
   // 初始加载数据
   useEffect(() => {
-    const yesterday = dayjs().subtract(1, "day").format("YYYY-MM-DD HH:mm:ss");
-    loadData(yesterday);
-  }, [loadData]);
+    loadInitialData();
+  }, [loadInitialData]);
 
   // 设置图表和滚动监听
   useEffect(() => {
     if (chartContainerRef.current && !chartRef.current) {
-      chartRef.current = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth,
-        height: window.innerHeight - 200,
-        layout: {
-          textColor: "rgba(33, 56, 77, 1)",
-          background: { type: ColorType.Solid, color: "#ffffff" },
+      const crosshairOptions: DeepPartial<CrosshairOptions> = {
+        mode: CrosshairMode.Magnet,
+        vertLine: {
+          labelVisible: true,
+          labelBackgroundColor: "#404040",
+          style: LineStyle.Dotted,
+          width: 1,
+          color: "rgba(33, 56, 77, 0.1)",
+          visible: true,
         },
-        crosshair: {
-          mode: 1,
-          vertLine: {
-            width: 1,
-            color: "rgba(33, 56, 77, 0.1)",
-            style: 0,
-            labelBackgroundColor: "rgba(33, 56, 77, 0.1)",
-            labelVisible: true,
+        horzLine: {
+          labelVisible: true,
+          labelBackgroundColor: "#404040",
+          style: LineStyle.Dotted,
+          width: 1,
+          color: "rgba(33, 56, 77, 0.1)",
+          visible: true,
+        },
+      };
+
+      // 在 priceFormat 配置中添加
+      const priceFormat: DeepPartial<PriceFormat> = {
+        type: "price",
+        precision: 2,
+        minMove: 0.01,
+      };
+
+      // 在创建图表时的配置中
+      const chartOptions: DeepPartial<ChartOptions> = {
+        layout: {
+          background: { color: "#ffffff" },
+          textColor: "#333",
+          fontSize: 12,
+          fontFamily: "-apple-system, system-ui, sans-serif",
+        },
+        grid: {
+          vertLines: { color: "#f0f0f0" },
+          horzLines: { color: "#f0f0f0" },
+        },
+        crosshair: crosshairOptions,
+        rightPriceScale: {
+          borderColor: "#f0f0f0",
+          visible: true,
+          scaleMargins: {
+            top: 0.1,
+            bottom: 0.4,
           },
-          horzLine: {
-            visible: true,
-            labelVisible: true,
-            color: "rgba(33, 56, 77, 0.1)",
-            width: 1,
-            style: 0,
-            labelBackgroundColor: "rgba(33, 56, 77, 0.1)",
+          alignLabels: false,
+          borderVisible: false,
+          entireTextOnly: true,
+        },
+        leftPriceScale: {
+          borderColor: "#f0f0f0",
+          visible: Boolean(data),
+          scaleMargins: {
+            top: 0.1,
+            bottom: 0.4,
           },
+        },
+        timeScale: {
+          borderColor: "#f0f0f0",
+          timeVisible: true,
+          secondsVisible: true,
+          tickMarkFormatter: (time: number) => formatTime(time, interval),
         },
         localization: {
           locale: "en-US",
           priceFormatter: (price: number) => price.toFixed(2),
           timeFormatter: (time: number) => formatTime(time, interval),
         },
-        timeScale: {
-          timeVisible: true,
-          secondsVisible: false,
-          borderVisible: false,
-          tickMarkFormatter: (time: number) => formatTime(time, interval),
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: true,
         },
-        grid: {
-          vertLines: {
-            color: "rgba(197, 203, 206, 0.2)",
-          },
-          horzLines: {
-            color: "rgba(197, 203, 206, 0.2)",
-          },
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
         },
-        rightPriceScale: {
-          visible: true,
-          autoScale: true,
-          borderVisible: false,
-          scaleMargins: {
-            top: 0.1,
-            bottom: 0.4, // 为下方图表留出更多空间
-          },
-        },
-        leftPriceScale: {
-          visible: true,
-          autoScale: true,
-          borderVisible: false,
-          scaleMargins: {
-            top: 0.1,
-            bottom: 0.4, // 为下方图表留出更多空间
-          },
-        },
+      };
+
+      chartRef.current = createChart(chartContainerRef.current, {
+        width: chartContainerRef.current.clientWidth,
+        height: window.innerHeight - 80,
+        ...chartOptions,
       });
 
       // 添加K线图
@@ -164,25 +200,104 @@ export const useChart = ({
         borderVisible: false,
         wickUpColor: "#26a69a",
         wickDownColor: "#ef5350",
-        lastValueVisible: false,
-        priceLineVisible: false,
-        priceFormat: {
-          type: "price",
-          precision: 2,
-          minMove: 0.01,
-        },
+        priceScaleId: "right",
+        lastValueVisible: true,
+        priceLineVisible: true,
+        priceFormat: priceFormat,
       });
 
       candlestickSeriesRef.current = candlestickSeries;
 
+      // 添加 legend 显示 OHLC 数据
+      legendRef.current = document.createElement("div");
+      const legend = legendRef.current;
+      legend.style.position = "absolute";
+      legend.style.left = !Boolean(data) ? "0px" : "70px";
+      legend.style.top = "0px"; // 完全贴合顶部
+      legend.style.padding = "6px 12px";
+      legend.style.fontSize = "12px";
+      legend.style.fontFamily = "monospace";
+      legend.style.color = "#131722";
+      legend.style.background = "transparent"; // 移除背景色
+      legend.style.zIndex = "3";
+      legend.style.userSelect = "none"; // 防止文字被选中
+
+      chartContainerRef.current.appendChild(legend);
+
+      // 修改 subscribeCrosshairMove 事件处理
+      chartRef.current.subscribeCrosshairMove((param) => {
+        if (param.time && param.point) {
+          const price = param.seriesData.get(
+            candlestickSeriesRef.current
+          ) as any;
+
+          const trade = data?.trades?.find(
+            (t) => new Date(t.timestamp + "Z").getTime() / 1000 === param.time
+          );
+
+          if (price) {
+            legend.innerHTML = `
+              <div style="font-family: -apple-system, system-ui, sans-serif; padding: 4px 8px; line-height: 1.5">
+                <div style="display: flex; gap: 12px; align-items: center; border-bottom: ${
+                  trade ? "1px solid rgba(0,0,0,0.05)" : "none"
+                }; padding-bottom: ${trade ? "4px" : "0"}">
+                  <span style="font-weight: 500; color: #666">
+                    ${formatTime(param.time as number, interval)}
+                  </span>
+                  <div style="display: flex; gap: 8px">
+                    <span style="display: flex; gap: 4px">
+                      <span style="color: #888">O</span>
+                      <span style="color: ${
+                        price.open >= price.close ? "#ef5350" : "#26a69a"
+                      }; font-weight: 500">
+                        ${price.open.toFixed(2)}
+                      </span>
+                    </span>
+                    <span style="display: flex; gap: 4px">
+                      <span style="color: #888">H</span>
+                      <span style="color: #26a69a; font-weight: 500">
+                        ${price.high.toFixed(2)}
+                      </span>
+                    </span>
+                    <span style="display: flex; gap: 4px">
+                      <span style="color: #888">L</span>
+                      <span style="color: #ef5350; font-weight: 500">
+                        ${price.low.toFixed(2)}
+                      </span>
+                    </span>
+                    <span style="display: flex; gap: 4px">
+                      <span style="color: #888">C</span>
+                      <span style="color: ${
+                        price.open <= price.close ? "#26a69a" : "#ef5350"
+                      }; font-weight: 500">
+                        ${price.close.toFixed(2)}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            `;
+            legend.style.display = "block";
+
+            // 检查是否悬停在交易标记上
+            if (trade) {
+              setHighlightedTradeTime(trade.timestamp);
+            } else {
+              setHighlightedTradeTime(null);
+            }
+          }
+        } else {
+          legend.style.display = "none";
+        }
+      });
+
       // 添加权益曲线作为子图
       const equitySeries = chartRef.current.addLineSeries({
-        color: "rgba(76, 175, 80, 1)",
         lineWidth: 1,
         priceScaleId: "left",
         title: "Equity",
+        visible: true,
         lastValueVisible: true,
-        priceLineVisible: false,
         priceFormat: {
           type: "price",
           precision: 2,
@@ -193,22 +308,20 @@ export const useChart = ({
       // 添加持仓量柱状图
       const positionSeries = chartRef.current.addHistogramSeries({
         color: "rgba(41, 98, 255, 0.3)",
-        priceScaleId: "position",
+        priceScaleId: "position", // 使用独立的价格轴
         title: "Position",
-        lastValueVisible: true,
         priceFormat: {
           type: "volume",
           precision: 3,
         },
-        // 根据持仓方向改变颜色
         base: 0,
       });
 
       // 配置持仓量价格轴
       chartRef.current.priceScale("position").applyOptions({
         scaleMargins: {
-          top: 0.7, // 将持仓量图表移到更下方
-          bottom: 0.0, // 紧贴底部
+          top: 0.9, // 改为0.85，将持仓量图表下移
+          bottom: 0.0, // 保持紧贴底部
         },
         visible: true,
         borderVisible: true,
@@ -216,156 +329,10 @@ export const useChart = ({
         autoScale: true,
       });
 
-      // 添加 legend 显示 OHLC 数据
-      legendRef.current = document.createElement("div");
-      const legend = legendRef.current;
-      legend.style.position = "absolute";
-      legend.style.padding = "12px";
-      legend.style.fontSize = "12px";
-      legend.style.background = "rgba(255, 255, 255, 0.95)";
-      legend.style.border = "1px solid rgba(0, 0, 0, 0.1)";
-      legend.style.borderRadius = "6px";
-      legend.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
-      legend.style.pointerEvents = "none";
-      legend.style.zIndex = "3";
-      legend.style.display = "none";
-      legend.style.minWidth = "200px";
-      chartContainerRef.current.appendChild(legend);
-
-      chartRef.current.subscribeCrosshairMove((param) => {
-        if (param.time && param.point) {
-          const price = param.seriesData.get(candlestickSeries) as any;
-          const trade = data?.trades.find(
-            (t) => new Date(t.timestamp).getTime() / 1000 === param.time
-          );
-          const equity = data?.equity.find(
-            (e) => new Date(e.timestamp).getTime() / 1000 === param.time
-          );
-
-          if (price) {
-            const color = price.close >= price.open ? "#26a69a" : "#ef5350";
-            legend.innerHTML = `
-              <div style="display: flex; flex-direction: column; gap: 8px;">
-                <div style="background: rgba(0, 0, 0, 0.02); padding: 8px; border-radius: 4px;">
-                  <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
-                    <div style="display: flex; justify-content: space-between; min-width: 20px;">
-                      <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">Open</span>
-                      <span style="color: ${color}; font-family: monospace;">${price.open.toFixed(
-              2
-            )}</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; min-width: 20px;">
-                      <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">High</span>
-                      <span style="color: ${color}; font-family: monospace;">${price.high.toFixed(
-              2
-            )}</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; min-width: 20px;">
-                      <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">Low</span>
-                      <span style="color: ${color}; font-family: monospace;">${price.low.toFixed(
-              2
-            )}</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; min-width: 20px;">
-                      <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">Close</span>
-                      <span style="color: ${color}; font-family: monospace;">${price.close.toFixed(
-              2
-            )}</span>
-                    </div>
-                  </div>
-                  ${
-                    equity
-                      ? `
-                      <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0, 0, 0, 0.06);">
-                        <div style="display: flex; justify-content: space-between; min-width: 260px;">
-                          <span style="color: rgba(0, 0, 0, 0.45)">Position</span>
-                          <span style="color: rgba(41, 98, 255, 0.8); font-family: monospace;">
-                            ${equity.position.toFixed(3)} BTC
-                          </span>
-                        </div>
-                      </div>
-                      `
-                      : ""
-                  }
-                </div>
-                ${
-                  trade
-                    ? `
-                    <div style="background: ${
-                      trade.action === "BUY"
-                        ? "rgba(38, 166, 154, 0.1)"
-                        : "rgba(239, 83, 80, 0.1)"
-                    }; padding: 8px; border-radius: 4px;">
-                      <div style="color: ${
-                        trade.action === "BUY" ? "#26a69a" : "#ef5350"
-                      }">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px; min-width: 260px;">
-                          <span style="margin-right: 12px;">${
-                            trade.action
-                          }</span>
-                          <span style="font-family: monospace;">${trade.price.toFixed(
-                            2
-                          )}</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px; min-width: 260px;">
-                          <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">Size</span>
-                          <span style="font-family: monospace;">${trade.size.toFixed(
-                            3
-                          )} BTC</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; min-width: 260px;">
-                          <span style="color: rgba(0, 0, 0, 0.45); margin-right: 12px;">PnL</span>
-                          <span style="color: ${
-                            trade.pnl >= 0 ? "#26a69a" : "#ef5350"
-                          }; font-family: monospace;">
-                            ${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    `
-                    : ""
-                }
-              </div>
-            `;
-
-            // 更新 legend 位置
-            const container =
-              chartContainerRef.current?.getBoundingClientRect();
-            if (container) {
-              const x = param.point.x + 20;
-              const y = param.point.y + 20;
-
-              const legendWidth = legend.offsetWidth;
-              const legendHeight = legend.offsetHeight;
-
-              let finalX = x;
-              let finalY = y;
-
-              if (x + legendWidth > container.width) {
-                finalX = x - legendWidth - 40;
-              }
-
-              if (y + legendHeight > container.height) {
-                finalY = y - legendHeight - 40;
-              }
-
-              legend.style.left = `${finalX}px`;
-              legend.style.top = `${finalY}px`;
-            }
-
-            legend.style.display = "block";
-          }
-        } else {
-          legend.style.display = "none";
-        }
-      });
-
       if (data) {
-        // 设置K线数据
-        candlestickSeries.setData(
+        candlestickSeriesRef.current.setData(
           data.price_data.map((item) => ({
-            time: (new Date(item.timestamp).getTime() / 1000) as Time,
+            time: (new Date(item.timestamp + "Z").getTime() / 1000) as Time,
             open: item.open,
             high: item.high,
             low: item.low,
@@ -375,23 +342,20 @@ export const useChart = ({
 
         // 添加交易标记
         const markers: ChartMarker[] = data.trades.map((trade) => ({
-          time: (new Date(trade.timestamp).getTime() / 1000) as Time,
-          position:
-            trade.action === "BUY"
-              ? "belowBar"
-              : ("aboveBar" as SeriesMarkerPosition),
+          time: (new Date(trade.timestamp + "Z").getTime() / 1000) as Time,
+          position: trade.action === "BUY" ? "belowBar" : "aboveBar",
           color: trade.action === "BUY" ? "#26a69a" : "#ef5350",
           shape: trade.action === "BUY" ? "arrowUp" : "arrowDown",
+          size: 1, // 增大标记尺寸
           text: "",
-          size: 1,
         }));
 
-        candlestickSeries.setMarkers(markers);
+        candlestickSeriesRef.current.setMarkers(markers);
 
         // 设置权益数据
         equitySeries.setData(
           data.equity.map((item) => ({
-            time: (new Date(item.timestamp).getTime() / 1000) as Time,
+            time: (new Date(item.timestamp + "Z").getTime() / 1000) as Time,
             value: item.equity,
           }))
         );
@@ -399,12 +363,12 @@ export const useChart = ({
         // 设置持仓量数据
         positionSeries.setData(
           data.equity.map((item) => ({
-            time: (new Date(item.timestamp).getTime() / 1000) as Time,
+            time: (new Date(item.timestamp + "Z").getTime() / 1000) as Time,
             value: item.position,
             color:
               item.position > 0
                 ? "rgba(38, 166, 154, 0.5)" // 多仓颜色
-                : item.position < 0
+                : item.position <= 0
                 ? "rgba(239, 83, 80, 0.5)" // 空仓颜色
                 : "rgba(41, 98, 255, 0.3)", // 无仓位颜色
           }))
@@ -412,6 +376,11 @@ export const useChart = ({
 
         // 自动调整图表大小
         chartRef.current.timeScale().fitContent();
+
+        if (!hasUsedInitialDataRef.current) {
+          hasUsedInitialDataRef.current = true;
+          oldestTimestampRef.current = data.price_data[0].timestamp;
+        }
       }
 
       // 设置滚动监听
@@ -419,6 +388,7 @@ export const useChart = ({
 
       return () => {
         cleanup();
+        hasUsedInitialDataRef.current = false;
         if (chartRef.current) {
           chartRef.current.remove();
           chartRef.current = null;
@@ -460,6 +430,11 @@ export const useChart = ({
       overlay.style.zIndex = "2";
     }
 
+    if (data && overlayRef.current) {
+      // remove overlay
+      overlayRef.current.style.display = "none";
+    }
+
     if (chartContainerRef.current) {
       const element =
         chartContainerRef.current.querySelectorAll("table tr td")[1];
@@ -472,7 +447,8 @@ export const useChart = ({
       if (
         param.time &&
         selectionStartRef.current &&
-        (param.sourceEvent?.metaKey || param.sourceEvent?.ctrlKey)
+        (param.sourceEvent?.metaKey || param.sourceEvent?.ctrlKey) &&
+        !data
       ) {
         selectionEndRef.current = param.time as number;
 
@@ -511,7 +487,8 @@ export const useChart = ({
       if (
         selectionStartRef.current === null &&
         param.time &&
-        (param.sourceEvent?.metaKey || param.sourceEvent?.ctrlKey)
+        (param.sourceEvent?.metaKey || param.sourceEvent?.ctrlKey) &&
+        !data
       ) {
         selectionStartRef.current = param.time as number;
         chartRef.current?.applyOptions({
@@ -539,6 +516,7 @@ export const useChart = ({
     window.addEventListener("keyup", handleKeyUp);
     chartRef.current.subscribeClick(handleMouseDown);
     chartRef.current.subscribeCrosshairMove(handleMouseMove);
+
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
@@ -549,7 +527,7 @@ export const useChart = ({
         overlayRef.current.remove();
       }
     };
-  }, [interval]);
+  }, [interval, data]);
 
   return {
     chartContainerRef,
@@ -558,5 +536,7 @@ export const useChart = ({
     selectionStartRef,
     selectionEndRef,
     clearOverlay,
+    loadInitialData,
+    candlestickSeriesRef,
   };
 };

@@ -3,13 +3,14 @@ import pandas as pd
 import numpy as np
 from src.indicators.technical import TechnicalIndicators
 from datetime import datetime
+from src.utils.logger import setup_logger
 
 class Strategy:
     """策略基类"""
     def __init__(self):
         self.ti = TechnicalIndicators()
         self.position = 0
-        self.lookback_periods = 100
+        self.logger = setup_logger('strategy')
         
         # 风控参数（默认无限制）
         self.position_limit = 1.0  # 允许满仓
@@ -32,6 +33,11 @@ class Strategy:
         self.current_capital = 0
         self.initial_capital = 0
         self.current_equity = 0
+
+    @property
+    def lookback_periods(self) -> int:
+        """获取策略所需的最小回看周期数"""
+        raise NotImplementedError("Strategy must implement lookback_periods")
 
     def check_risk_limits(self, current_time: datetime, signal: Dict[str, Any]) -> bool:
         """检查风控限制"""
@@ -130,21 +136,26 @@ class Strategy:
 
 class SMAWithADXStrategy(Strategy):
     """带ADX过滤的双均线策略"""
-    def __init__(self, fast_period: int = 50, slow_period: int = 120, adx_period: int = 14):
+    def __init__(
+        self,
+        fast_period: int = 5,
+        slow_period: int = 20,
+        adx_period: int = 14,
+        adx_threshold: float = 25,
+    ):
         super().__init__()
         self.fast_period = fast_period
         self.slow_period = slow_period
         self.adx_period = adx_period
-        self.adx_threshold = 25
-        self.lookback_periods = max(slow_period, fast_period) + adx_period
+        self.adx_threshold = adx_threshold
         
-        # 设置风控参数
-        self.position_limit = 1
-        self.min_cash_reserve = 0
-        self.min_trade_interval = pd.Timedelta(hours=1)
-        self.max_drawdown = 1.0  # 移除最大回撤限制
-        self.stop_loss = 0.1
-        self.take_profit = 0.80
+    @property
+    def lookback_periods(self) -> int:
+        """
+        获取策略所需的最小回看周期数
+        对于SMA策略，需要max(fast_period, slow_period, adx_period)个周期的数据
+        """
+        return max(self.fast_period, self.slow_period, self.adx_period)
     
     def generate_signal(self, current_data: pd.Series, history: pd.DataFrame) -> Optional[Dict[str, Any]]:
         """生成交易信号"""
